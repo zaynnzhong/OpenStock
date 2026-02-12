@@ -41,7 +41,7 @@ export function detectBrokerFormat(headerLine: string): BrokerFormat {
         return 'csv_robinhood';
     }
 
-    if (lower.includes('date') && lower.includes('action') && lower.includes('symbol') && lower.includes('quantity') && lower.includes('price') && lower.includes('fees')) {
+    if (lower.includes('action') && lower.includes('symbol') && lower.includes('quantity') && lower.includes('price') && (lower.includes('fees') || lower.includes('commission'))) {
         return 'csv_schwab';
     }
 
@@ -236,22 +236,96 @@ function parseSchwab(lines: string[], format: TradeSource): ParseResult {
     return { trades, errors, format };
 }
 
-// Generic CSV format: Date, Symbol, Type (BUY/SELL/DIVIDEND), Quantity, Price, Fees, Total, Notes
+/**
+ * Finds the best column index for trade type/action.
+ * Prefers specific headers like 'activity_sub_type', 'trans code', 'action', 'side'
+ * over ambiguous ones like 'type' (which may match 'account_type').
+ */
+function findTypeColumnIndex(headers: string[]): number {
+    // Priority 1: Exact or very specific matches
+    const specific = [
+        'activity_sub_type', 'sub_type', 'subtype',
+        'trans code', 'trans_code', 'transaction_type', 'transaction type',
+        'trade_type', 'trade type', 'order_type', 'order type',
+        'action', 'side', 'direction',
+        'buy/sell', 'buy_sell', 'buysell',
+    ];
+    for (const name of specific) {
+        const idx = headers.indexOf(name);
+        if (idx !== -1) return idx;
+    }
+
+    // Priority 2: Columns that contain 'type' but NOT 'account_type' or 'activity_type' alone
+    for (let i = 0; i < headers.length; i++) {
+        const h = headers[i];
+        if (h === 'type') return i;
+        if (h.includes('type') && !h.startsWith('account') && !h.startsWith('activity_type') && h !== 'activity_type') {
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+/**
+ * Infers trade type from a string value.
+ * Returns null if unable to determine.
+ */
+function inferTradeType(typeStr: string, quantity: number, cashAmount: number): TradeType | null {
+    const upper = typeStr.toUpperCase().trim();
+
+    if (upper === 'BUY' || upper === 'B' || upper === 'BOT' || upper === 'BOUGHT'
+        || upper === 'BUY TO COVER' || upper === 'BCVR' || upper === 'LONG') {
+        return 'BUY';
+    }
+    if (upper === 'SELL' || upper === 'S' || upper === 'SLD' || upper === 'SOLD'
+        || upper === 'SHORT' || upper === 'SHRT' || upper === 'SS') {
+        return 'SELL';
+    }
+    if (upper.includes('BUY')) return 'BUY';
+    if (upper.includes('SELL') || upper.includes('SOLD')) return 'SELL';
+    if (upper.includes('DIV')) return 'DIVIDEND';
+    if (upper.includes('OPTION') || upper.includes('PREMIUM')) return 'OPTION_PREMIUM';
+
+    // Fallback: infer from quantity sign or cash amount sign
+    if (quantity < 0) return 'SELL';
+    if (cashAmount > 0 && quantity !== 0) return 'SELL';
+    if (cashAmount < 0 && quantity !== 0) return 'BUY';
+
+    return null;
+}
+
+// Generic CSV format: flexible header matching
 function parseGeneric(lines: string[], format: TradeSource): ParseResult {
     const trades: ParsedTrade[] = [];
     const errors: ParseError[] = [];
     const headers = splitCSVLine(lines[0]).map(h => h.toLowerCase().trim());
 
     const idx = {
-        date: headers.findIndex(h => h.includes('date')),
-        symbol: headers.findIndex(h => h.includes('symbol') || h.includes('ticker')),
-        type: headers.findIndex(h => h.includes('type') || h.includes('action') || h.includes('side')),
+        date: headers.findIndex(h => h.includes('date') && !h.includes('settle') && !h.includes('expir')),
+        symbol: headers.findIndex(h => h === 'symbol' || h === 'ticker' || h === 'instrument'),
+        type: findTypeColumnIndex(headers),
         quantity: headers.findIndex(h => h.includes('quantity') || h.includes('shares') || h.includes('qty')),
-        price: headers.findIndex(h => h.includes('price')),
+        price: headers.findIndex(h => h === 'price' || h === 'unit_price' || h === 'unit price' || h === 'avg_price' || h === 'fill_price'),
         fees: headers.findIndex(h => h.includes('fee') || h.includes('commission')),
-        total: headers.findIndex(h => h.includes('total') || h.includes('amount') || h.includes('proceeds')),
-        notes: headers.findIndex(h => h.includes('note') || h.includes('memo') || h.includes('description')),
+        total: headers.findIndex(h => h.includes('net_cash') || h.includes('net cash') || h.includes('total') || h.includes('amount') || h.includes('proceeds') || h.includes('net_amount')),
+        notes: headers.findIndex(h => h.includes('note') || h.includes('memo') || h.includes('description') || h.includes('name')),
     };
+
+    // Fallback: if date not found with exclusions, try any 'date' column
+    if (idx.date === -1) {
+        idx.date = headers.findIndex(h => h.includes('date'));
+    }
+
+    // Fallback: if symbol not found exactly, try contains
+    if (idx.symbol === -1) {
+        idx.symbol = headers.findIndex(h => h.includes('symbol') || h.includes('ticker'));
+    }
+
+    // Fallback: price column - try any header with 'price'
+    if (idx.price === -1) {
+        idx.price = headers.findIndex(h => h.includes('price') && !h.includes('strike'));
+    }
 
     if (idx.date === -1 || idx.symbol === -1) {
         return {
@@ -269,8 +343,9 @@ function parseGeneric(lines: string[], format: TradeSource): ParseResult {
             const fields = splitCSVLine(line);
             const dateStr = fields[idx.date] || '';
             const symbol = (fields[idx.symbol] || '').toUpperCase();
-            const typeStr = (idx.type >= 0 ? fields[idx.type] : 'BUY').toUpperCase();
-            const quantity = Math.abs(parseNumber(idx.quantity >= 0 ? fields[idx.quantity] : '0'));
+            const rawType = idx.type >= 0 ? (fields[idx.type] || '') : '';
+            const rawQuantity = parseNumber(idx.quantity >= 0 ? fields[idx.quantity] : '0');
+            const quantity = Math.abs(rawQuantity);
             const price = Math.abs(parseNumber(idx.price >= 0 ? fields[idx.price] : '0'));
             const fees = Math.abs(parseNumber(idx.fees >= 0 ? fields[idx.fees] : '0'));
             const total = parseNumber(idx.total >= 0 ? fields[idx.total] : '0');
@@ -282,17 +357,10 @@ function parseGeneric(lines: string[], format: TradeSource): ParseResult {
                 continue;
             }
 
-            let type: TradeType;
-            if (typeStr.includes('BUY')) {
-                type = 'BUY';
-            } else if (typeStr.includes('SELL')) {
-                type = 'SELL';
-            } else if (typeStr.includes('DIV')) {
-                type = 'DIVIDEND';
-            } else if (typeStr.includes('OPTION') || typeStr.includes('PREMIUM')) {
-                type = 'OPTION_PREMIUM';
-            } else {
-                type = 'BUY'; // Default
+            const type = inferTradeType(rawType, rawQuantity, total);
+            if (!type) {
+                errors.push({ row: i + 1, message: `Cannot determine trade type from "${rawType}"`, raw: line });
+                continue;
             }
 
             const totalAmount = Math.abs(total) || (quantity * price);
