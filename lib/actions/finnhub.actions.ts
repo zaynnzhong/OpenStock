@@ -69,6 +69,44 @@ export async function getSMA(symbol: string, shortPeriod: number = 20, longPerio
     }
 }
 
+export async function getHistoricalPrices(symbol: string, fromDate: string) {
+    try {
+        const period1 = Math.floor(new Date(fromDate).getTime() / 1000);
+        const period2 = Math.floor(Date.now() / 1000);
+
+        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?period1=${period1}&period2=${period2}&interval=1d`;
+        const res = await fetch(url, {
+            headers: { "User-Agent": "Mozilla/5.0" },
+            cache: "force-cache",
+            next: { revalidate: 3600 },
+        } as any);
+
+        if (!res.ok) return null;
+        const data = await res.json();
+
+        const result = data?.chart?.result?.[0];
+        if (!result) return null;
+
+        const timestamps: number[] = result.timestamps || result.timestamp || [];
+        const closes: (number | null)[] = result.indicators?.quote?.[0]?.close || [];
+
+        const dates: string[] = [];
+        const prices: number[] = [];
+
+        for (let i = 0; i < timestamps.length; i++) {
+            if (closes[i] !== null && closes[i] !== undefined) {
+                dates.push(new Date(timestamps[i] * 1000).toISOString().split('T')[0]);
+                prices.push(closes[i] as number);
+            }
+        }
+
+        return { dates, prices };
+    } catch (e) {
+        console.error(`Error fetching historical prices for`, symbol, e);
+        return null;
+    }
+}
+
 export async function getQuote(symbol: string) {
     try {
         const token = NEXT_PUBLIC_FINNHUB_API_KEY;

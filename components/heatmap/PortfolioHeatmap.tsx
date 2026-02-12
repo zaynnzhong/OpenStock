@@ -219,6 +219,21 @@ export default function PortfolioHeatmap({ initialData, symbols, userId }: Portf
 
     const hasAnyHoldings = stocks.some((s) => s.shares > 0);
 
+    // Today's return: sum of (daily change * shares) for all holdings
+    const todaysReturn = useMemo(() => {
+        if (!hasAnyHoldings) return { value: 0, percent: 0 };
+        const totalChange = stocks.reduce(
+            (sum, s) => sum + (s.shares > 0 ? s.change * s.shares : 0),
+            0
+        );
+        const totalPrevValue = stocks.reduce(
+            (sum, s) => sum + (s.shares > 0 ? (s.price - s.change) * s.shares : 0),
+            0
+        );
+        const pct = totalPrevValue > 0 ? (totalChange / totalPrevValue) * 100 : 0;
+        return { value: totalChange, percent: pct };
+    }, [stocks, hasAnyHoldings]);
+
     if (stocks.length === 0) {
         return (
             <div className="w-full">
@@ -255,11 +270,22 @@ export default function PortfolioHeatmap({ initialData, symbols, userId }: Portf
                         </p>
                     ) : null}
                 </div>
-                <span className="text-xs text-gray-500">
-                    {hasAnyHoldings
-                        ? "Sized by position value"
-                        : "Equal weight (no holdings set)"}
-                </span>
+                <div className="flex items-center gap-4">
+                    {hasAnyHoldings && (
+                        <div className="text-right">
+                            <p className="text-xs text-gray-500">Today&apos;s Return</p>
+                            <p className={`text-sm font-semibold ${todaysReturn.value >= 0 ? "text-green-400" : "text-red-400"}`}>
+                                {todaysReturn.value >= 0 ? "+" : ""}${Math.abs(todaysReturn.value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                {" "}({todaysReturn.percent >= 0 ? "+" : ""}{todaysReturn.percent.toFixed(2)}%)
+                            </p>
+                        </div>
+                    )}
+                    <span className="text-xs text-gray-500">
+                        {hasAnyHoldings
+                            ? "Sized by position value"
+                            : "Equal weight (no holdings set)"}
+                    </span>
+                </div>
             </div>
             <div
                 ref={containerRef}
@@ -279,6 +305,10 @@ export default function PortfolioHeatmap({ initialData, symbols, userId }: Portf
                     const isMedium = stock.w > 80 && stock.h > 60;
                     const isSmall = stock.w > 55 && stock.h > 40;
                     const isTiny = !isSmall;
+
+                    // Today's return per symbol
+                    const dailyReturn = stock.shares > 0 ? stock.change * stock.shares : 0;
+                    const hasDailyReturn = stock.shares > 0 && stock.change !== 0;
 
                     // Unrealized P/L
                     const hasHoldingsData = stock.shares > 0 && stock.avgCost > 0 && stock.price > 0;
@@ -327,13 +357,18 @@ export default function PortfolioHeatmap({ initialData, symbols, userId }: Portf
                                     <span className="font-bold text-white text-[11px] leading-tight truncate w-full">
                                         {stock.symbol}
                                     </span>
+                                    {hasDailyReturn && (
+                                        <span className={`text-[10px] font-semibold leading-tight ${dailyReturn >= 0 ? "text-green-300" : "text-red-300"}`}>
+                                            {dailyReturn >= 0 ? "+" : "-"}${Math.abs(dailyReturn).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </span>
+                                    )}
                                     <span className={`text-[10px] font-semibold leading-tight ${stock.changePercent >= 0 ? "text-green-300" : "text-red-300"}`}>
                                         {formatChangePercent(stock.changePercent)}
                                     </span>
                                 </>
                             )}
 
-                            {/* Medium blocks: price + symbol + change% + P/L% */}
+                            {/* Medium blocks: price + symbol + today's return + change% + P/L% */}
                             {isMedium && !isLarge && (
                                 <>
                                     <span className="font-extrabold text-white text-sm leading-tight truncate w-full">
@@ -342,6 +377,11 @@ export default function PortfolioHeatmap({ initialData, symbols, userId }: Portf
                                     <span className="font-bold text-white text-xs leading-tight truncate w-full">
                                         {stock.symbol}
                                     </span>
+                                    {hasDailyReturn && (
+                                        <span className={`text-[10px] font-semibold mt-0.5 leading-tight ${dailyReturn >= 0 ? "text-green-300" : "text-red-300"}`}>
+                                            {dailyReturn >= 0 ? "+" : "-"}${Math.abs(dailyReturn).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </span>
+                                    )}
                                     <span className={`text-xs font-semibold mt-0.5 leading-tight ${stock.changePercent >= 0 ? "text-green-300" : "text-red-300"}`}>
                                         {formatChangePercent(stock.changePercent)}
                                     </span>
@@ -365,6 +405,11 @@ export default function PortfolioHeatmap({ initialData, symbols, userId }: Portf
                                     {isXLarge && (
                                         <span className="text-white/90 text-xs leading-tight mt-0.5 px-1 line-clamp-1">
                                             {stock.name}
+                                        </span>
+                                    )}
+                                    {hasDailyReturn && (
+                                        <span className={`text-xs font-semibold mt-0.5 leading-tight ${dailyReturn >= 0 ? "text-green-300" : "text-red-300"}`}>
+                                            {dailyReturn >= 0 ? "+" : "-"}${Math.abs(dailyReturn).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} today
                                         </span>
                                     )}
                                     <span className={`text-xs font-semibold mt-0.5 leading-tight ${stock.changePercent >= 0 ? "text-green-300" : "text-red-300"}`}>

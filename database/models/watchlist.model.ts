@@ -7,6 +7,7 @@ export interface WatchlistItem extends Document {
     shares: number;
     avgCost: number;
     addedAt: Date;
+    watchSince: Date | null;
 }
 
 const WatchlistSchema = new Schema<WatchlistItem>(
@@ -17,6 +18,7 @@ const WatchlistSchema = new Schema<WatchlistItem>(
         shares: { type: Number, default: 0 },
         avgCost: { type: Number, default: 0 },
         addedAt: { type: Date, default: Date.now },
+        watchSince: { type: Date, default: null },
     },
     { timestamps: false }
 );

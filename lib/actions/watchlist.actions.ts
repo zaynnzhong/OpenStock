@@ -89,6 +89,25 @@ export async function getUserWatchlist(userId: string) {
     }
 }
 
+export async function updateWatchSince(userId: string, symbol: string, date: string | null) {
+    try {
+        await connectToDatabase();
+
+        const updated = await Watchlist.findOneAndUpdate(
+            { userId, symbol: symbol.toUpperCase() },
+            { watchSince: date ? new Date(date) : null },
+            { new: true }
+        );
+
+        revalidatePath('/watchlist');
+        revalidatePath('/');
+        return JSON.parse(JSON.stringify(updated));
+    } catch (error) {
+        console.error('Error updating watchSince:', error);
+        throw new Error('Failed to update watch since date');
+    }
+}
+
 // Check if a symbol is in the user's watchlist
 export async function isStockInWatchlist(userId: string, symbol: string) {
     try {

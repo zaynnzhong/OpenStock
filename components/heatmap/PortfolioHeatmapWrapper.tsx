@@ -14,7 +14,9 @@ export default async function PortfolioHeatmapWrapper() {
     }
 
     const userId = session.user.id;
-    const watchlistItems = await getUserWatchlist(userId);
+    const allWatchlistItems = await getUserWatchlist(userId);
+    // Only show holdings (shares > 0) in the portfolio heatmap
+    const watchlistItems = allWatchlistItems.filter((item: any) => item.shares > 0);
     const symbols = watchlistItems.map((item: any) => item.symbol);
 
     if (symbols.length === 0) {
