@@ -1,10 +1,11 @@
-import { Schema, model, models, type Document, type Model } from 'mongoose';
+import mongoose, { Schema, model, type Document, type Model } from 'mongoose';
 
 export interface IAlert extends Document {
     userId: string;
     symbol: string;
     targetPrice: number;
     condition: 'ABOVE' | 'BELOW';
+    source: 'manual' | 'holdings';
     active: boolean;
     triggered: boolean;
     expiresAt: Date;
@@ -17,6 +18,7 @@ const AlertSchema = new Schema<IAlert>(
         symbol: { type: String, required: true, uppercase: true, trim: true },
         targetPrice: { type: Number, required: true },
         condition: { type: String, enum: ['ABOVE', 'BELOW'], required: true },
+        source: { type: String, enum: ['manual', 'holdings'], default: 'manual' },
         active: { type: Boolean, default: true },
         triggered: { type: Boolean, default: false },
         expiresAt: {
@@ -28,4 +30,9 @@ const AlertSchema = new Schema<IAlert>(
     { timestamps: true }
 );
 
-export const Alert: Model<IAlert> = (models?.Alert as Model<IAlert>) || model<IAlert>('Alert', AlertSchema);
+// Delete cached model to ensure schema changes are picked up across hot reloads
+if (mongoose.models.Alert) {
+    mongoose.deleteModel('Alert');
+}
+
+export const Alert: Model<IAlert> = model<IAlert>('Alert', AlertSchema);

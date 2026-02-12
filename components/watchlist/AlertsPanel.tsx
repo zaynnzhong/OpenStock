@@ -1,20 +1,41 @@
 "use client";
 
-import React from "react";
-import { Trash2, TrendingUp, Bell } from "lucide-react";
+import React, { useState, useEffect, useCallback } from "react";
+import { Trash2, Bell, RefreshCw } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
-import { deleteAlert } from "@/lib/actions/alert.actions";
+import { deleteAlert, getUserAlerts } from "@/lib/actions/alert.actions";
 
 interface AlertsPanelProps {
     alerts: any[];
-    onRefresh?: () => void;
+    userId: string;
 }
 
-export default function AlertsPanel({ alerts, onRefresh }: AlertsPanelProps) {
+export default function AlertsPanel({ alerts: initialAlerts, userId }: AlertsPanelProps) {
+    const [alerts, setAlerts] = useState(initialAlerts);
+    const [refreshing, setRefreshing] = useState(false);
+
+    const refresh = useCallback(async () => {
+        setRefreshing(true);
+        try {
+            const fresh = await getUserAlerts(userId);
+            setAlerts(fresh);
+        } catch (err) {
+            console.error("Failed to refresh alerts:", err);
+        } finally {
+            setRefreshing(false);
+        }
+    }, [userId]);
+
+    // Auto-refresh every 30s to pick up new holding alerts
+    useEffect(() => {
+        const interval = setInterval(refresh, 30000);
+        return () => clearInterval(interval);
+    }, [refresh]);
+
     const handleDelete = async (id: string) => {
         if (confirm("Are you sure you want to delete this alert?")) {
             await deleteAlert(id);
-            if (onRefresh) onRefresh();
+            setAlerts((curr) => curr.filter((a: any) => a._id !== id));
         }
     };
 
@@ -24,17 +45,29 @@ export default function AlertsPanel({ alerts, onRefresh }: AlertsPanelProps) {
                 <h2 className="text-lg font-semibold text-white flex items-center">
                     <Bell className="w-5 h-5 mr-2 text-yellow-500" />
                     Alerts
+                    {alerts.length > 0 && (
+                        <span className="ml-2 text-xs bg-gray-800 text-gray-400 px-2 py-0.5 rounded-full">
+                            {alerts.length}
+                        </span>
+                    )}
                 </h2>
-                {/* <button className="text-sm text-yellow-500 hover:underline">Create Alert</button> */}
+                <button
+                    onClick={refresh}
+                    disabled={refreshing}
+                    className="p-1.5 rounded text-gray-500 hover:text-white hover:bg-white/10 transition-colors"
+                    title="Refresh alerts"
+                >
+                    <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} />
+                </button>
             </div>
 
             <div className="space-y-3">
                 {alerts.length === 0 ? (
                     <div className="text-center py-8 text-gray-500 text-sm">
-                        No active alerts. Add one from the watchlist.
+                        No active alerts. Add holdings with avg cost to auto-create alerts.
                     </div>
                 ) : (
-                    alerts.map((alert) => (
+                    alerts.map((alert: any) => (
                         <div key={alert._id} className="bg-gray-800/40 rounded-lg p-3 border border-gray-800 relative group">
                             <div className="flex justify-between items-start">
                                 <div>
@@ -50,6 +83,11 @@ export default function AlertsPanel({ alerts, onRefresh }: AlertsPanelProps) {
                                     <div className="mt-2 text-xs text-yellow-500 font-medium">
                                         Condition: Price {alert.condition.toLowerCase()} {formatCurrency(alert.targetPrice)}
                                     </div>
+                                    {alert.source === 'holdings' && (
+                                        <span className="inline-block mt-1 text-[10px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded">
+                                            Auto · ±25% avg cost
+                                        </span>
+                                    )}
                                     <div className="text-[10px] text-gray-500 mt-1">
                                         Active until {new Date(new Date(alert.createdAt).getTime() + 90 * 24 * 60 * 60 * 1000).toLocaleDateString()}
                                     </div>

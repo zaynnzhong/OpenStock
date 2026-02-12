@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { connectToDatabase } from "@/database/mongoose";
+import { syncHoldingAlerts } from "@/lib/actions/alert.actions";
+import { getQuote } from "@/lib/actions/finnhub.actions";
 
 export async function PUT(req: NextRequest) {
     try {
@@ -31,6 +33,20 @@ export async function PUT(req: NextRequest) {
 
         if (!result) {
             return NextResponse.json({ error: "Stock not found in watchlist" }, { status: 404 });
+        }
+
+        // Auto-sync holding alerts at ±25% of avg cost
+        const finalAvgCost = result.avgCost || 0;
+        if (finalAvgCost > 0) {
+            try {
+                const quote = await getQuote(symbol.toUpperCase());
+                const currentPrice = quote?.c || 0;
+                if (currentPrice > 0) {
+                    await syncHoldingAlerts(userId, symbol, finalAvgCost, currentPrice);
+                }
+            } catch (err) {
+                console.error("[API /holdings] Failed to sync alerts:", err);
+            }
         }
 
         return NextResponse.json({

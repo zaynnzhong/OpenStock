@@ -3,7 +3,7 @@ import { auth } from '@/lib/better-auth/auth';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { getUserWatchlist } from '@/lib/actions/watchlist.actions';
-import { getUserAlerts } from '@/lib/actions/alert.actions';
+import { getUserAlerts, syncAllHoldingAlerts } from '@/lib/actions/alert.actions';
 import { getNews, getWatchlistData } from '@/lib/actions/finnhub.actions';
 import WatchlistManager from '@/components/watchlist/WatchlistManager';
 import AlertsPanel from '@/components/watchlist/AlertsPanel';
@@ -57,6 +57,15 @@ export default async function WatchlistPage() {
         };
     });
 
+    // Backfill holding alerts for existing holdings that don't have alerts yet
+    const holdingsWithCost = tableData.filter((s: any) => s.avgCost > 0 && s.price > 0);
+    let finalAlerts = alerts;
+    if (holdingsWithCost.length > 0) {
+        await syncAllHoldingAlerts(userId, holdingsWithCost);
+        // Re-fetch alerts so the initial render includes newly created ones
+        finalAlerts = await getUserAlerts(userId);
+    }
+
     // Fallback news if watchlist has items
     const relevantNews = watchlistSymbols.length > 0 ? await getNews(watchlistSymbols) : news;
 
@@ -90,7 +99,7 @@ export default async function WatchlistPage() {
 
                 {/* Sidebar - Alerts */}
                 <div className="lg:col-span-1">
-                    <AlertsPanel alerts={alerts} />
+                    <AlertsPanel alerts={finalAlerts} userId={userId} />
                 </div>
             </div>
         </div>
