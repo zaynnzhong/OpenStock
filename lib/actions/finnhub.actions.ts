@@ -22,13 +22,13 @@ async function fetchJSON<T>(url: string, revalidateSeconds?: number): Promise<T>
 
 export { fetchJSON };
 
-export async function getTechnicalIndicator(symbol: string, indicator: string, timeperiod: number) {
+export async function getTechnicalIndicator(symbol: string, indicator: string, timeperiod: number, resolution: string = "D") {
     try {
         const token = NEXT_PUBLIC_FINNHUB_API_KEY;
         const now = Math.floor(Date.now() / 1000);
         const from = now - 365 * 24 * 60 * 60; // 1 year back
         const fields = encodeURIComponent(JSON.stringify({ timeperiod }));
-        const url = `${FINNHUB_BASE_URL}/indicator?symbol=${encodeURIComponent(symbol)}&resolution=D&from=${from}&to=${now}&indicator=${indicator}&indicatorFields=${fields}&token=${token}`;
+        const url = `${FINNHUB_BASE_URL}/indicator?symbol=${encodeURIComponent(symbol)}&resolution=${resolution}&from=${from}&to=${now}&indicator=${indicator}&indicatorFields=${fields}&token=${token}`;
         // Cache for 1 hour
         return await fetchJSON<any>(url, 3600);
     } catch (e) {

@@ -157,9 +157,12 @@ export async function POST(req: NextRequest) {
             }
         }
 
-        // /sma <symbol> — show SMA20 & SMA50
+        // /sma <symbol> [short] [long] [timeframe] — show SMA with trend signal
         if (name === "sma") {
             const symbol = options?.find((o: any) => o.name === "symbol")?.value?.toUpperCase();
+            const shortPeriod = options?.find((o: any) => o.name === "short")?.value || 20;
+            const longPeriod = options?.find((o: any) => o.name === "long")?.value || 50;
+            const timeframe = options?.find((o: any) => o.name === "timeframe")?.value || "D";
             if (!symbol) {
                 return NextResponse.json({
                     type: CHANNEL_MESSAGE,
@@ -168,47 +171,50 @@ export async function POST(req: NextRequest) {
             }
 
             try {
-                const [quote, sma20Data, sma50Data] = await Promise.all([
+                const [quote, smaShortData, smaLongData] = await Promise.all([
                     getQuote(symbol),
-                    getTechnicalIndicator(symbol, "sma", 20),
-                    getTechnicalIndicator(symbol, "sma", 50),
+                    getTechnicalIndicator(symbol, "sma", shortPeriod, timeframe),
+                    getTechnicalIndicator(symbol, "sma", longPeriod, timeframe),
                 ]);
 
                 const price = quote?.c || 0;
-                const sma20 = sma20Data?.sma?.slice(-1)[0] || null;
-                const sma50 = sma50Data?.sma?.slice(-1)[0] || null;
+                const smaShort = smaShortData?.sma?.slice(-1)[0] || null;
+                const smaLong = smaLongData?.sma?.slice(-1)[0] || null;
 
-                if (!price || (!sma20 && !sma50)) {
+                if (!price || (!smaShort && !smaLong)) {
                     return NextResponse.json({
                         type: CHANNEL_MESSAGE,
                         data: { content: `Could not fetch SMA data for **${symbol}**.` },
                     });
                 }
 
+                const tfLabel: Record<string, string> = { "1": "1min", "5": "5min", "15": "15min", "60": "1hr", "D": "Daily", "W": "Weekly", "M": "Monthly" };
+                const tf = tfLabel[timeframe] || timeframe;
+
                 const lines: string[] = [];
-                lines.push(`📊 **${symbol}** — $${price.toFixed(2)}`);
+                lines.push(`📊 **${symbol}** — $${price.toFixed(2)} *(${tf})*`);
                 lines.push("");
 
-                if (sma20 !== null) {
-                    const aboveBelow20 = price >= sma20 ? "above" : "below";
-                    const emoji20 = price >= sma20 ? "🟢" : "🔴";
-                    const diff20 = ((price - sma20) / sma20 * 100).toFixed(2);
-                    lines.push(`${emoji20} **SMA 20:** $${sma20.toFixed(2)} (price ${aboveBelow20}, ${diff20}%)`);
+                if (smaShort !== null) {
+                    const ab = price >= smaShort ? "above" : "below";
+                    const emoji = price >= smaShort ? "🟢" : "🔴";
+                    const diff = ((price - smaShort) / smaShort * 100).toFixed(2);
+                    lines.push(`${emoji} **SMA ${shortPeriod}:** $${smaShort.toFixed(2)} (price ${ab}, ${diff}%)`);
                 }
 
-                if (sma50 !== null) {
-                    const aboveBelow50 = price >= sma50 ? "above" : "below";
-                    const emoji50 = price >= sma50 ? "🟢" : "🔴";
-                    const diff50 = ((price - sma50) / sma50 * 100).toFixed(2);
-                    lines.push(`${emoji50} **SMA 50:** $${sma50.toFixed(2)} (price ${aboveBelow50}, ${diff50}%)`);
+                if (smaLong !== null) {
+                    const ab = price >= smaLong ? "above" : "below";
+                    const emoji = price >= smaLong ? "🟢" : "🔴";
+                    const diff = ((price - smaLong) / smaLong * 100).toFixed(2);
+                    lines.push(`${emoji} **SMA ${longPeriod}:** $${smaLong.toFixed(2)} (price ${ab}, ${diff}%)`);
                 }
 
-                if (sma20 !== null && sma50 !== null) {
+                if (smaShort !== null && smaLong !== null) {
                     lines.push("");
-                    if (sma20 > sma50) {
-                        lines.push("⬆️ **Bullish** — SMA20 is above SMA50");
+                    if (smaShort > smaLong) {
+                        lines.push(`⬆️ **Bullish** — SMA${shortPeriod} is above SMA${longPeriod}`);
                     } else {
-                        lines.push("⬇️ **Bearish** — SMA20 is below SMA50");
+                        lines.push(`⬇️ **Bearish** — SMA${shortPeriod} is below SMA${longPeriod}`);
                     }
                 }
 
