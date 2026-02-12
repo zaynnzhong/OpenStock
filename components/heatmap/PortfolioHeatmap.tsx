@@ -273,8 +273,12 @@ export default function PortfolioHeatmap({ initialData, symbols, userId }: Portf
                         w: number;
                         h: number;
                     };
-                    const isLarge = stock.w > 110 && stock.h > 70;
-                    const isMedium = stock.w > 60 && stock.h > 45;
+                    // Size tiers based on block dimensions
+                    const isXLarge = stock.w > 180 && stock.h > 120;
+                    const isLarge = stock.w > 120 && stock.h > 90;
+                    const isMedium = stock.w > 80 && stock.h > 60;
+                    const isSmall = stock.w > 55 && stock.h > 40;
+                    const isTiny = !isSmall;
 
                     // Unrealized P/L
                     const hasHoldingsData = stock.shares > 0 && stock.avgCost > 0 && stock.price > 0;
@@ -289,7 +293,7 @@ export default function PortfolioHeatmap({ initialData, symbols, userId }: Portf
                         <Link
                             key={stock.symbol}
                             href={`/stocks/${stock.symbol}`}
-                            className="absolute flex flex-col items-center justify-center text-center transition-all duration-200 hover:brightness-125 hover:z-10 border border-black/30 group/block"
+                            className="absolute flex flex-col items-center justify-center text-center transition-all duration-200 hover:brightness-125 hover:z-10 border border-black/30 group/block overflow-hidden p-1"
                             style={{
                                 left: stock.x,
                                 top: stock.y,
@@ -301,64 +305,84 @@ export default function PortfolioHeatmap({ initialData, symbols, userId }: Portf
                             {/* Edit holdings button */}
                             <button
                                 onClick={(e) => handleEditClick(e, stock)}
-                                className="absolute top-1 right-1 p-1 rounded opacity-0 group-hover/block:opacity-100 transition-opacity bg-black/40 hover:bg-black/60 z-20"
+                                className="absolute top-0.5 right-0.5 p-0.5 rounded opacity-0 group-hover/block:opacity-100 transition-opacity bg-black/40 hover:bg-black/60 z-20"
                                 title="Edit holdings"
                             >
-                                <Pencil className="w-3 h-3 text-white/80" />
+                                <Pencil className="w-2.5 h-2.5 text-white/80" />
                             </button>
 
-                            {/* Live price — largest font */}
-                            <span className="font-extrabold text-white text-lg leading-tight">
-                                ${stock.price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                            </span>
+                            {/* Tiny blocks: just symbol */}
+                            {isTiny && (
+                                <span className="font-bold text-white text-[10px] leading-none truncate w-full">
+                                    {stock.symbol}
+                                </span>
+                            )}
 
-                            <span className="font-bold text-white text-base leading-tight">
-                                {stock.symbol}
-                            </span>
+                            {/* Small blocks: price + symbol */}
+                            {isSmall && !isMedium && (
+                                <>
+                                    <span className="font-bold text-white text-xs leading-tight truncate w-full">
+                                        ${stock.price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </span>
+                                    <span className="font-bold text-white text-[11px] leading-tight truncate w-full">
+                                        {stock.symbol}
+                                    </span>
+                                    <span className={`text-[10px] font-semibold leading-tight ${stock.changePercent >= 0 ? "text-green-300" : "text-red-300"}`}>
+                                        {formatChangePercent(stock.changePercent)}
+                                    </span>
+                                </>
+                            )}
+
+                            {/* Medium blocks: price + symbol + change% + P/L% */}
+                            {isMedium && !isLarge && (
+                                <>
+                                    <span className="font-extrabold text-white text-sm leading-tight truncate w-full">
+                                        ${stock.price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </span>
+                                    <span className="font-bold text-white text-xs leading-tight truncate w-full">
+                                        {stock.symbol}
+                                    </span>
+                                    <span className={`text-xs font-semibold mt-0.5 leading-tight ${stock.changePercent >= 0 ? "text-green-300" : "text-red-300"}`}>
+                                        {formatChangePercent(stock.changePercent)}
+                                    </span>
+                                    {hasHoldingsData && (
+                                        <span className={`text-[10px] font-semibold leading-tight ${unrealizedPL >= 0 ? "text-green-300" : "text-red-300"}`}>
+                                            {unrealizedPLPercent >= 0 ? "+" : ""}{unrealizedPLPercent.toFixed(1)}%
+                                        </span>
+                                    )}
+                                </>
+                            )}
+
+                            {/* Large blocks: full info */}
                             {isLarge && (
-                                <span className="text-white/90 text-sm leading-tight mt-0.5 px-1 line-clamp-1">
-                                    {stock.name}
-                                </span>
-                            )}
-                            {isMedium && (
-                                <span
-                                    className={`text-sm font-semibold mt-1 leading-tight ${
-                                        stock.changePercent >= 0
-                                            ? "text-green-300"
-                                            : "text-red-300"
-                                    }`}
-                                >
-                                    {formatChangePercent(stock.changePercent)}
-                                </span>
-                            )}
-                            {isLarge && hasHoldingsData && (
-                                <span
-                                    className={`text-sm font-semibold mt-0.5 leading-tight ${
-                                        unrealizedPL >= 0
-                                            ? "text-green-300"
-                                            : "text-red-300"
-                                    }`}
-                                >
-                                    {unrealizedPL >= 0 ? "+" : ""}
-                                    ${Math.abs(unrealizedPL).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                    {" "}({unrealizedPLPercent >= 0 ? "+" : ""}{unrealizedPLPercent.toFixed(1)}%)
-                                </span>
-                            )}
-                            {isMedium && !isLarge && hasHoldingsData && (
-                                <span
-                                    className={`text-xs font-semibold mt-0.5 leading-tight ${
-                                        unrealizedPL >= 0
-                                            ? "text-green-300"
-                                            : "text-red-300"
-                                    }`}
-                                >
-                                    {unrealizedPLPercent >= 0 ? "+" : ""}{unrealizedPLPercent.toFixed(1)}%
-                                </span>
-                            )}
-                            {isLarge && stock.shares > 0 && (
-                                <span className="text-white/80 text-xs mt-0.5">
-                                    {stock.weight.toFixed(1)}% · {stock.shares} shares
-                                </span>
+                                <>
+                                    <span className="font-extrabold text-white text-base leading-tight truncate w-full">
+                                        ${stock.price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </span>
+                                    <span className="font-bold text-white text-sm leading-tight truncate w-full">
+                                        {stock.symbol}
+                                    </span>
+                                    {isXLarge && (
+                                        <span className="text-white/90 text-xs leading-tight mt-0.5 px-1 line-clamp-1">
+                                            {stock.name}
+                                        </span>
+                                    )}
+                                    <span className={`text-xs font-semibold mt-0.5 leading-tight ${stock.changePercent >= 0 ? "text-green-300" : "text-red-300"}`}>
+                                        {formatChangePercent(stock.changePercent)}
+                                    </span>
+                                    {hasHoldingsData && (
+                                        <span className={`text-xs font-semibold leading-tight ${unrealizedPL >= 0 ? "text-green-300" : "text-red-300"}`}>
+                                            {unrealizedPL >= 0 ? "+" : ""}
+                                            ${Math.abs(unrealizedPL).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                            {" "}({unrealizedPLPercent >= 0 ? "+" : ""}{unrealizedPLPercent.toFixed(1)}%)
+                                        </span>
+                                    )}
+                                    {stock.shares > 0 && (
+                                        <span className="text-white/70 text-[10px] mt-0.5">
+                                            {stock.weight.toFixed(1)}% · {stock.shares} shares
+                                        </span>
+                                    )}
+                                </>
                             )}
                         </Link>
                     );
