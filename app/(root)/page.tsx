@@ -1,4 +1,6 @@
+import { Suspense } from "react";
 import TradingViewWidget from "@/components/TradingViewWidget";
+import PortfolioHeatmapWrapper from "@/components/heatmap/PortfolioHeatmapWrapper";
 import {
     HEATMAP_WIDGET_CONFIG,
     MARKET_DATA_WIDGET_CONFIG,
@@ -6,7 +8,7 @@ import {
     TOP_STORIES_WIDGET_CONFIG
 } from "@/lib/constants";
 
-const Home = () => {
+const Home = async () => {
     const scriptUrl = `https://s3.tradingview.com/external-embedding/embed-widget-`;
 
     return (
@@ -21,7 +23,7 @@ const Home = () => {
                         height={600}
                     />
                 </div>
-                <div className="md-col-span xl:col-span-2">
+                <div className="md:col-span-1 xl:col-span-2">
                     <TradingViewWidget
                         title="Stock Heatmap"
                         scriptUrl={`${scriptUrl}stock-heatmap.js`}
@@ -29,6 +31,20 @@ const Home = () => {
                         height={600}
                     />
                 </div>
+            </section>
+            <section className="w-full mt-8">
+                <Suspense
+                    fallback={
+                        <div>
+                            <h3 className="font-semibold text-2xl text-gray-100 mb-5">
+                                Portfolio Heatmap
+                            </h3>
+                            <div className="w-full h-[500px] rounded-xl bg-gray-800 animate-pulse" />
+                        </div>
+                    }
+                >
+                    <PortfolioHeatmapWrapper />
+                </Suspense>
             </section>
             <section className="grid w-full gap-8 home-section">
                 <div className="h-full md:col-span-1 xl:col-span-2">
@@ -45,7 +61,6 @@ const Home = () => {
                         height={600}
                     />
                 </div>
-
             </section>
             <div className="w-full flex flex-col items-center justify-center mt-8 gap-4">
                 <h2 className="text-xl font-semibold text-gray-200">Upvote us on Peerlist 🚀</h2>

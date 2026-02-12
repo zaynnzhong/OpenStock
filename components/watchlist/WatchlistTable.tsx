@@ -26,7 +26,7 @@ export default function WatchlistTable({ data, userId, onRefresh }: WatchlistTab
     useEffect(() => {
         if (!stocks || stocks.length === 0) return;
 
-        // Poll for price updates every 15 seconds
+        // Poll for price updates every 30 seconds
         const interval = setInterval(async () => {
             try {
                 const symbols = stocks.map(s => s.symbol);
@@ -56,7 +56,7 @@ export default function WatchlistTable({ data, userId, onRefresh }: WatchlistTab
             } catch (err) {
                 console.error("Failed to poll watchlist prices", err);
             }
-        }, 5000);
+        }, 30000);
 
         return () => clearInterval(interval);
     }, [stocks]); // Re-create interval if list size changes

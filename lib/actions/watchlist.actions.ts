@@ -6,7 +6,13 @@ import { revalidatePath } from 'next/cache';
 
 // -- CRUD Operations --
 
-export async function addToWatchlist(userId: string, symbol: string, company: string) {
+export async function addToWatchlist(
+    userId: string,
+    symbol: string,
+    company: string,
+    shares: number = 0,
+    avgCost: number = 0
+) {
     try {
         await connectToDatabase();
 
@@ -17,16 +23,45 @@ export async function addToWatchlist(userId: string, symbol: string, company: st
                 userId,
                 symbol: symbol.toUpperCase(),
                 company,
+                shares,
+                avgCost,
                 addedAt: new Date()
             },
             { upsert: true, new: true }
         );
 
         revalidatePath('/watchlist');
+        revalidatePath('/');
         return JSON.parse(JSON.stringify(newItem));
     } catch (error) {
         console.error('Error adding to watchlist:', error);
         throw new Error('Failed to add to watchlist');
+    }
+}
+
+export async function updateHoldings(
+    userId: string,
+    symbol: string,
+    shares: number,
+    avgCost: number
+) {
+    console.log('[updateHoldings] called:', { userId, symbol, shares, avgCost });
+    try {
+        await connectToDatabase();
+
+        const updated = await Watchlist.findOneAndUpdate(
+            { userId, symbol: symbol.toUpperCase() },
+            { shares, avgCost },
+            { new: true }
+        );
+
+        console.log('[updateHoldings] result:', updated?.symbol, 'shares:', updated?.shares, 'avgCost:', updated?.avgCost);
+        revalidatePath('/watchlist');
+        revalidatePath('/');
+        return JSON.parse(JSON.stringify(updated));
+    } catch (error) {
+        console.error('[updateHoldings] error:', error);
+        throw new Error('Failed to update holdings');
     }
 }
 
