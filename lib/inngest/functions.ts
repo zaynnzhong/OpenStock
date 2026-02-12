@@ -339,20 +339,51 @@ export const checkStockAlerts = inngest.createFunction(
             }
         }
 
-        // Step 5: Process triggers
+        // Step 5: Process triggers + send Discord notifications
         if (triggeredAlerts.length > 0) {
             await step.run('process-triggered-alerts', async () => {
                 const { connectToDatabase } = await import("@/database/mongoose");
                 const { Alert } = await import("@/database/models/alert.model");
-                // In a real app we would import 'kit' here and use kit.sendBroadcast or similar
-                // For now, we just log it as the critical logic is the detection
                 await connectToDatabase();
+
+                const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
 
                 for (const { alert, currentPrice } of triggeredAlerts) {
                     console.log(`🚀 ALERT FIRED: ${alert.symbol} is ${currentPrice} (${alert.condition} ${alert.targetPrice})`);
 
                     // Mark triggered
                     await Alert.findByIdAndUpdate(alert._id, { triggered: true, active: false });
+
+                    // Send Discord notification
+                    if (webhookUrl) {
+                        try {
+                            const isAbove = alert.condition === 'ABOVE';
+                            const emoji = isAbove ? '🟢' : '🔴';
+                            const direction = isAbove ? 'above' : 'below';
+                            const source = alert.source === 'holdings' ? ' (±25% avg cost)' : '';
+
+                            await fetch(webhookUrl, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    embeds: [{
+                                        title: `${emoji} ${alert.symbol} Alert Triggered`,
+                                        description: `**${alert.symbol}** hit **$${currentPrice.toFixed(2)}** — crossed ${direction} your target of **$${alert.targetPrice.toFixed(2)}**${source}`,
+                                        color: isAbove ? 0x22c55e : 0xef4444,
+                                        fields: [
+                                            { name: 'Current Price', value: `$${currentPrice.toFixed(2)}`, inline: true },
+                                            { name: 'Target', value: `$${alert.targetPrice.toFixed(2)}`, inline: true },
+                                            { name: 'Condition', value: `${alert.condition}`, inline: true },
+                                        ],
+                                        timestamp: new Date().toISOString(),
+                                        footer: { text: 'OpenStock Alerts' },
+                                    }],
+                                }),
+                            });
+                        } catch (err) {
+                            console.error(`Failed to send Discord notification for ${alert.symbol}:`, err);
+                        }
+                    }
                 }
             });
         }
