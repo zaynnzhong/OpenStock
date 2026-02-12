@@ -215,6 +215,77 @@ declare global {
         threshold: number;
         changePercent?: number;
     };
+
+    // Portfolio / Trade types
+    type TradeType = 'BUY' | 'SELL' | 'OPTION_PREMIUM' | 'DIVIDEND';
+    type CostBasisMethod = 'FIFO' | 'AVERAGE';
+    type OptionAction = 'BUY_TO_OPEN' | 'BUY_TO_CLOSE' | 'SELL_TO_OPEN' | 'SELL_TO_CLOSE';
+    type TradeSource = 'manual' | 'csv_robinhood' | 'csv_schwab' | 'csv_generic';
+
+    type TradeData = {
+        _id: string;
+        userId: string;
+        symbol: string;
+        type: TradeType;
+        quantity: number;
+        pricePerShare: number;
+        totalAmount: number;
+        fees: number;
+        optionDetails?: {
+            contractType: 'CALL' | 'PUT';
+            action: OptionAction;
+            strikePrice: number;
+            expirationDate: string;
+            contracts: number;
+            premiumPerContract: number;
+        };
+        notes?: string;
+        executedAt: string;
+        source: TradeSource;
+        importBatchId?: string;
+        createdAt: string;
+        updatedAt: string;
+    };
+
+    type PositionWithPriceData = {
+        symbol: string;
+        company: string;
+        shares: number;
+        costBasis: number;
+        avgCostPerShare: number;
+        adjustedCostBasis: number;
+        realizedPL: number;
+        unrealizedPL: number;
+        optionsPremiumNet: number;
+        dividendsReceived: number;
+        currentPrice: number;
+        marketValue: number;
+        totalReturn: number;
+        totalReturnPercent: number;
+        costBasisMethod: CostBasisMethod;
+        lots: { shares: number; costPerShare: number; date: string }[];
+    };
+
+    type PortfolioSummaryData = {
+        totalValue: number;
+        totalCostBasis: number;
+        totalRealizedPL: number;
+        totalUnrealizedPL: number;
+        totalOptionsPremium: number;
+        totalDividends: number;
+        todayReturn: number;
+        todayReturnPercent: number;
+        positions: PositionWithPriceData[];
+    };
+
+    type PLChartData = {
+        date: string;
+        totalValue: number;
+        totalCostBasis: number;
+        realizedPL: number;
+        unrealizedPL: number;
+        totalPL: number;
+    };
 }
 
 export {};

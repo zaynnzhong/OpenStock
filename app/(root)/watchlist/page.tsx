@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation';
 import { getUserWatchlist } from '@/lib/actions/watchlist.actions';
 import { getUserAlerts, syncAllHoldingAlerts } from '@/lib/actions/alert.actions';
 import { getNews, getWatchlistData } from '@/lib/actions/finnhub.actions';
+import { getTradeSymbols } from '@/lib/actions/trade.actions';
 import WatchlistManager from '@/components/watchlist/WatchlistManager';
 import AlertsPanel from '@/components/watchlist/AlertsPanel';
 import NewsGrid from '@/components/watchlist/NewsGrid';
@@ -23,10 +24,11 @@ export default async function WatchlistPage() {
     const userId = session.user.id;
 
     // Parallel data fetching
-    const [watchlistItems, alerts, news] = await Promise.all([
+    const [watchlistItems, alerts, news, tradeSymbols] = await Promise.all([
         getUserWatchlist(userId),
         getUserAlerts(userId),
-        getNews() // Initial news fetch
+        getNews(), // Initial news fetch
+        getTradeSymbols(userId),
     ]);
 
     const watchlistSymbols = watchlistItems.map((item: any) => item.symbol);
@@ -54,6 +56,8 @@ export default async function WatchlistPage() {
             marketCap: market?.marketCap || 0,
             shares: item.shares || 0,
             avgCost: item.avgCost || 0,
+            watchSince: item.watchSince || null,
+            addedAt: item.addedAt || null,
         };
     });
 
@@ -88,7 +92,7 @@ export default async function WatchlistPage() {
                 {/* Main Content */}
                 <div className="lg:col-span-3 space-y-8">
                     <div className="space-y-6">
-                        <WatchlistManager initialItems={watchlistItems} userId={userId} tableData={tableData} />
+                        <WatchlistManager initialItems={watchlistItems} userId={userId} tableData={tableData} tradeSymbols={tradeSymbols} />
                     </div>
 
                     {/* News Section */}

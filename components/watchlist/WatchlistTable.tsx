@@ -3,16 +3,17 @@
 import React, { useEffect, useState, useRef } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowUp, ArrowDown, Bell, Check, X } from "lucide-react";
+import { ArrowUp, ArrowDown, Bell, Check, X, ExternalLink } from "lucide-react";
 import CreateAlertModal from "./CreateAlertModal";
 import WatchlistButton from "@/components/WatchlistButton";
 import { formatCurrency, formatNumber } from "@/lib/utils";
-import { removeFromWatchlist } from "@/lib/actions/watchlist.actions";
+import { removeFromWatchlist, updateWatchSince } from "@/lib/actions/watchlist.actions";
 
 interface WatchlistTableProps {
     data: any[];
     userId: string;
     onRefresh?: () => void;
+    tradeSymbols?: string[];
 }
 
 function EditableCell({
@@ -111,7 +112,8 @@ function EditableCell({
     );
 }
 
-export default function WatchlistTable({ data, userId, onRefresh }: WatchlistTableProps) {
+export default function WatchlistTable({ data, userId, onRefresh, tradeSymbols = [] }: WatchlistTableProps) {
+    const tradeSymbolSet = new Set(tradeSymbols.map(s => s.toUpperCase()));
     const [stocks, setStocks] = useState(data);
 
     useEffect(() => {
@@ -181,8 +183,8 @@ export default function WatchlistTable({ data, userId, onRefresh }: WatchlistTab
     }
 
     return (
-        <div className="overflow-hidden rounded-xl border border-white/10 bg-black/40 backdrop-blur-md shadow-xl">
-            <table className="w-full text-left text-sm border-collapse">
+        <div className="overflow-x-auto rounded-xl border border-white/10 bg-black/40 backdrop-blur-md shadow-xl">
+            <table className="w-full text-left text-sm border-collapse min-w-[900px]">
                 <thead className="bg-white/5 text-gray-400 font-medium border-b border-white/10">
                     <tr>
                         <th className="px-6 py-4 font-semibold tracking-wide">Company</th>
@@ -193,6 +195,7 @@ export default function WatchlistTable({ data, userId, onRefresh }: WatchlistTab
                         <th className="px-6 py-4 font-semibold tracking-wide">Avg Cost</th>
                         <th className="px-6 py-4 font-semibold tracking-wide">P/L</th>
                         <th className="px-6 py-4 font-semibold tracking-wide">Market Cap</th>
+                        <th className="px-6 py-4 font-semibold tracking-wide">Watch Since</th>
                         <th className="px-6 py-4 text-right font-semibold tracking-wide">Actions</th>
                     </tr>
                 </thead>
@@ -241,23 +244,33 @@ export default function WatchlistTable({ data, userId, onRefresh }: WatchlistTab
                                     </div>
                                 </td>
                                 <td className="px-6 py-4 text-gray-300 font-medium">
-                                    <EditableCell
-                                        value={stock.shares}
-                                        symbol={stock.symbol}
-                                        field="shares"
-                                        userId={userId}
-                                        onSaved={handleCellSaved}
-                                    />
+                                    {tradeSymbolSet.has(stock.symbol) ? (
+                                        <Link href="/portfolio" className="inline-flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 transition-colors">
+                                            Managed by trades <ExternalLink className="w-3 h-3" />
+                                        </Link>
+                                    ) : (
+                                        <EditableCell
+                                            value={stock.shares}
+                                            symbol={stock.symbol}
+                                            field="shares"
+                                            userId={userId}
+                                            onSaved={handleCellSaved}
+                                        />
+                                    )}
                                 </td>
                                 <td className="px-6 py-4 text-gray-300 font-medium">
-                                    <EditableCell
-                                        value={stock.avgCost}
-                                        symbol={stock.symbol}
-                                        field="avgCost"
-                                        userId={userId}
-                                        onSaved={handleCellSaved}
-                                        format={(v) => formatCurrency(v)}
-                                    />
+                                    {tradeSymbolSet.has(stock.symbol) ? (
+                                        <span className="text-gray-500 text-xs">—</span>
+                                    ) : (
+                                        <EditableCell
+                                            value={stock.avgCost}
+                                            symbol={stock.symbol}
+                                            field="avgCost"
+                                            userId={userId}
+                                            onSaved={handleCellSaved}
+                                            format={(v) => formatCurrency(v)}
+                                        />
+                                    )}
                                 </td>
                                 <td className="px-6 py-4 font-medium">
                                     {hasHoldings ? (
@@ -271,6 +284,32 @@ export default function WatchlistTable({ data, userId, onRefresh }: WatchlistTab
                                 </td>
                                 <td className="px-6 py-4 text-gray-400 font-medium">
                                     {formatNumber(stock.marketCap)}
+                                </td>
+                                <td className="px-6 py-4 text-gray-400">
+                                    {(!stock.shares || stock.shares === 0) ? (
+                                        <input
+                                            type="date"
+                                            value={stock.watchSince ? new Date(stock.watchSince).toISOString().split('T')[0] : (stock.addedAt ? new Date(stock.addedAt).toISOString().split('T')[0] : '')}
+                                            onChange={async (e) => {
+                                                const newDate = e.target.value || null;
+                                                try {
+                                                    await updateWatchSince(userId, stock.symbol, newDate);
+                                                    setStocks(current =>
+                                                        current.map(s =>
+                                                            s.symbol === stock.symbol
+                                                                ? { ...s, watchSince: newDate ? new Date(newDate).toISOString() : null }
+                                                                : s
+                                                        )
+                                                    );
+                                                } catch (err) {
+                                                    console.error('Failed to update watchSince:', err);
+                                                }
+                                            }}
+                                            className="bg-white/5 border border-white/10 rounded px-2 py-1 text-sm text-gray-300 outline-none focus:border-blue-500 w-[130px]"
+                                        />
+                                    ) : (
+                                        <span className="text-gray-600">—</span>
+                                    )}
                                 </td>
                                 <td className="px-6 py-4 text-right">
                                     <div className="flex items-center justify-end space-x-3 opacity-80 group-hover:opacity-100 transition-opacity">

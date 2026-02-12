@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { connectToDatabase } from "@/database/mongoose";
 import { syncHoldingAlerts } from "@/lib/actions/alert.actions";
 import { getQuote } from "@/lib/actions/finnhub.actions";
+import { hasTradesForSymbol } from "@/lib/actions/trade.actions";
 
 export async function PUT(req: NextRequest) {
     try {
@@ -9,6 +10,15 @@ export async function PUT(req: NextRequest) {
 
         if (!userId || !symbol) {
             return NextResponse.json({ error: "Missing userId or symbol" }, { status: 400 });
+        }
+
+        // Guard: if trades exist for this symbol, direct user to Portfolio page
+        const hasTrades = await hasTradesForSymbol(userId, symbol.toUpperCase());
+        if (hasTrades) {
+            return NextResponse.json(
+                { error: "This symbol is managed by trade log. Use the Portfolio page to manage trades." },
+                { status: 409 }
+            );
         }
 
         const mongoose = await connectToDatabase();
