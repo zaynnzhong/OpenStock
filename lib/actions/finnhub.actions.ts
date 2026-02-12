@@ -22,6 +22,21 @@ async function fetchJSON<T>(url: string, revalidateSeconds?: number): Promise<T>
 
 export { fetchJSON };
 
+export async function getTechnicalIndicator(symbol: string, indicator: string, timeperiod: number) {
+    try {
+        const token = NEXT_PUBLIC_FINNHUB_API_KEY;
+        const now = Math.floor(Date.now() / 1000);
+        const from = now - 365 * 24 * 60 * 60; // 1 year back
+        const fields = encodeURIComponent(JSON.stringify({ timeperiod }));
+        const url = `${FINNHUB_BASE_URL}/indicator?symbol=${encodeURIComponent(symbol)}&resolution=D&from=${from}&to=${now}&indicator=${indicator}&indicatorFields=${fields}&token=${token}`;
+        // Cache for 1 hour
+        return await fetchJSON<any>(url, 3600);
+    } catch (e) {
+        console.error(`Error fetching ${indicator} for`, symbol, e);
+        return null;
+    }
+}
+
 export async function getQuote(symbol: string) {
     try {
         const token = NEXT_PUBLIC_FINNHUB_API_KEY;

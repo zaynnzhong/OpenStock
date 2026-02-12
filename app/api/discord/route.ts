@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import nacl from "tweetnacl";
 import { connectToDatabase } from "@/database/mongoose";
 import { Alert } from "@/database/models/alert.model";
-import { getQuote } from "@/lib/actions/finnhub.actions";
+import { getQuote, getTechnicalIndicator } from "@/lib/actions/finnhub.actions";
 
 const DISCORD_PUBLIC_KEY = process.env.DISCORD_PUBLIC_KEY!;
 const USER_ID = process.env.DISCORD_BOT_USER_ID!;
@@ -153,6 +153,74 @@ export async function POST(req: NextRequest) {
                 return NextResponse.json({
                     type: CHANNEL_MESSAGE,
                     data: { content: "Failed to fetch price." },
+                });
+            }
+        }
+
+        // /sma <symbol> — show SMA20 & SMA50
+        if (name === "sma") {
+            const symbol = options?.find((o: any) => o.name === "symbol")?.value?.toUpperCase();
+            if (!symbol) {
+                return NextResponse.json({
+                    type: CHANNEL_MESSAGE,
+                    data: { content: "Usage: `/sma AAPL`" },
+                });
+            }
+
+            try {
+                const [quote, sma20Data, sma50Data] = await Promise.all([
+                    getQuote(symbol),
+                    getTechnicalIndicator(symbol, "sma", 20),
+                    getTechnicalIndicator(symbol, "sma", 50),
+                ]);
+
+                const price = quote?.c || 0;
+                const sma20 = sma20Data?.sma?.slice(-1)[0] || null;
+                const sma50 = sma50Data?.sma?.slice(-1)[0] || null;
+
+                if (!price || (!sma20 && !sma50)) {
+                    return NextResponse.json({
+                        type: CHANNEL_MESSAGE,
+                        data: { content: `Could not fetch SMA data for **${symbol}**.` },
+                    });
+                }
+
+                const lines: string[] = [];
+                lines.push(`📊 **${symbol}** — $${price.toFixed(2)}`);
+                lines.push("");
+
+                if (sma20 !== null) {
+                    const aboveBelow20 = price >= sma20 ? "above" : "below";
+                    const emoji20 = price >= sma20 ? "🟢" : "🔴";
+                    const diff20 = ((price - sma20) / sma20 * 100).toFixed(2);
+                    lines.push(`${emoji20} **SMA 20:** $${sma20.toFixed(2)} (price ${aboveBelow20}, ${diff20}%)`);
+                }
+
+                if (sma50 !== null) {
+                    const aboveBelow50 = price >= sma50 ? "above" : "below";
+                    const emoji50 = price >= sma50 ? "🟢" : "🔴";
+                    const diff50 = ((price - sma50) / sma50 * 100).toFixed(2);
+                    lines.push(`${emoji50} **SMA 50:** $${sma50.toFixed(2)} (price ${aboveBelow50}, ${diff50}%)`);
+                }
+
+                if (sma20 !== null && sma50 !== null) {
+                    lines.push("");
+                    if (sma20 > sma50) {
+                        lines.push("⬆️ **Bullish** — SMA20 is above SMA50");
+                    } else {
+                        lines.push("⬇️ **Bearish** — SMA20 is below SMA50");
+                    }
+                }
+
+                return NextResponse.json({
+                    type: CHANNEL_MESSAGE,
+                    data: { content: lines.join("\n") },
+                });
+            } catch (err) {
+                console.error("Discord /sma error:", err);
+                return NextResponse.json({
+                    type: CHANNEL_MESSAGE,
+                    data: { content: "Failed to fetch SMA data." },
                 });
             }
         }
