@@ -81,6 +81,10 @@ export async function getPortfolioSummary(userId: string): Promise<PortfolioSumm
         const totalReturn = pos.realizedPL + unrealizedPL + pos.optionsPremiumNet + pos.dividendsReceived;
         const totalReturnPercent = pos.costBasis > 0 ? (totalReturn / pos.costBasis) * 100 : 0;
 
+        const adjustedCostPerShare = pos.shares > 0
+            ? (pos.costBasis - pos.optionsPremiumNet - pos.dividendsReceived) / pos.shares
+            : 0;
+
         positions.push({
             symbol,
             company: companyMap.get(symbol) || price?.name || symbol,
@@ -88,6 +92,7 @@ export async function getPortfolioSummary(userId: string): Promise<PortfolioSumm
             costBasis: pos.costBasis,
             avgCostPerShare: pos.avgCostPerShare,
             adjustedCostBasis: pos.adjustedCostBasis,
+            adjustedCostPerShare,
             realizedPL: pos.realizedPL,
             unrealizedPL,
             optionsPremiumNet: pos.optionsPremiumNet,

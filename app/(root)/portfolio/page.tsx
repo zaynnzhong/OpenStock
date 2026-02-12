@@ -2,7 +2,7 @@ import { auth } from '@/lib/better-auth/auth';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { getPortfolioSummary } from '@/lib/actions/portfolio.actions';
-import { getUserTrades } from '@/lib/actions/trade.actions';
+import { getTradesWithPL } from '@/lib/actions/trade.actions';
 import { getPortfolioSettings } from '@/lib/actions/portfolio-settings.actions';
 import { getUserWatchlist } from '@/lib/actions/watchlist.actions';
 import PortfolioDashboard from '@/components/portfolio/PortfolioDashboard';
@@ -21,7 +21,7 @@ export default async function PortfolioPage() {
     // Parallel data fetching
     const [summary, tradesResult, settings, watchlistItems] = await Promise.all([
         getPortfolioSummary(userId),
-        getUserTrades(userId, { limit: 50, offset: 0, sort: 'desc' }),
+        getTradesWithPL(userId, { limit: 50, offset: 0, sort: 'desc' }),
         getPortfolioSettings(userId),
         getUserWatchlist(userId),
     ]);

@@ -245,6 +245,11 @@ declare global {
         importBatchId?: string;
         createdAt: string;
         updatedAt: string;
+        // Computed per-trade fields (populated by getTradesWithPL)
+        realizedPL?: number;
+        cashFlow?: number;
+        runningCostPerShare?: number;
+        runningAdjustedCostPerShare?: number;
     };
 
     type PositionWithPriceData = {
@@ -254,6 +259,7 @@ declare global {
         costBasis: number;
         avgCostPerShare: number;
         adjustedCostBasis: number;
+        adjustedCostPerShare: number;
         realizedPL: number;
         unrealizedPL: number;
         optionsPremiumNet: number;
