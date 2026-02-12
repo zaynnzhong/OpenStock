@@ -22,17 +22,49 @@ async function fetchJSON<T>(url: string, revalidateSeconds?: number): Promise<T>
 
 export { fetchJSON };
 
-export async function getTechnicalIndicator(symbol: string, indicator: string, timeperiod: number, resolution: string = "D") {
+export async function getSMA(symbol: string, shortPeriod: number = 20, longPeriod: number = 50, timeframe: string = "D") {
     try {
-        const token = NEXT_PUBLIC_FINNHUB_API_KEY;
-        const now = Math.floor(Date.now() / 1000);
-        const from = now - 365 * 24 * 60 * 60; // 1 year back
-        const fields = encodeURIComponent(JSON.stringify({ timeperiod }));
-        const url = `${FINNHUB_BASE_URL}/indicator?symbol=${encodeURIComponent(symbol)}&resolution=${resolution}&from=${from}&to=${now}&indicator=${indicator}&indicatorFields=${fields}&token=${token}`;
-        // Cache for 1 hour
-        return await fetchJSON<any>(url, 3600);
+        // Map timeframe to Yahoo Finance interval/range
+        const tfMap: Record<string, { interval: string; range: string }> = {
+            "5": { interval: "5m", range: "5d" },
+            "15": { interval: "15m", range: "5d" },
+            "60": { interval: "60m", range: "30d" },
+            "D": { interval: "1d", range: "1y" },
+            "W": { interval: "1wk", range: "5y" },
+            "M": { interval: "1mo", range: "10y" },
+        };
+        const tf = tfMap[timeframe] || tfMap["D"];
+        const maxPeriod = Math.max(shortPeriod, longPeriod);
+
+        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${tf.range}&interval=${tf.interval}`;
+        const res = await fetch(url, {
+            headers: { "User-Agent": "Mozilla/5.0" },
+            cache: "force-cache",
+            next: { revalidate: 3600 },
+        } as any);
+
+        if (!res.ok) return null;
+        const data = await res.json();
+
+        const closes: number[] = (data?.chart?.result?.[0]?.indicators?.quote?.[0]?.close || [])
+            .filter((c: any) => c !== null && c !== undefined);
+
+        if (closes.length < maxPeriod) return null;
+
+        const calcSMA = (period: number) => {
+            const slice = closes.slice(-period);
+            return slice.reduce((a: number, b: number) => a + b, 0) / period;
+        };
+
+        return {
+            price: closes[closes.length - 1],
+            smaShort: calcSMA(shortPeriod),
+            smaLong: calcSMA(longPeriod),
+            shortPeriod,
+            longPeriod,
+        };
     } catch (e) {
-        console.error(`Error fetching ${indicator} for`, symbol, e);
+        console.error(`Error fetching SMA for`, symbol, e);
         return null;
     }
 }

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import nacl from "tweetnacl";
 import { connectToDatabase } from "@/database/mongoose";
 import { Alert } from "@/database/models/alert.model";
-import { getQuote, getTechnicalIndicator } from "@/lib/actions/finnhub.actions";
+import { getQuote, getSMA } from "@/lib/actions/finnhub.actions";
 
 const DISCORD_PUBLIC_KEY = process.env.DISCORD_PUBLIC_KEY!;
 const USER_ID = process.env.DISCORD_BOT_USER_ID!;
@@ -171,51 +171,38 @@ export async function POST(req: NextRequest) {
             }
 
             try {
-                const [quote, smaShortData, smaLongData] = await Promise.all([
-                    getQuote(symbol),
-                    getTechnicalIndicator(symbol, "sma", shortPeriod, timeframe),
-                    getTechnicalIndicator(symbol, "sma", longPeriod, timeframe),
-                ]);
+                const smaData = await getSMA(symbol, shortPeriod, longPeriod, timeframe);
 
-                const price = quote?.c || 0;
-                const smaShort = smaShortData?.sma?.slice(-1)[0] || null;
-                const smaLong = smaLongData?.sma?.slice(-1)[0] || null;
-
-                if (!price || (!smaShort && !smaLong)) {
+                if (!smaData) {
                     return NextResponse.json({
                         type: CHANNEL_MESSAGE,
                         data: { content: `Could not fetch SMA data for **${symbol}**.` },
                     });
                 }
 
-                const tfLabel: Record<string, string> = { "1": "1min", "5": "5min", "15": "15min", "60": "1hr", "D": "Daily", "W": "Weekly", "M": "Monthly" };
+                const { price, smaShort, smaLong } = smaData;
+                const tfLabel: Record<string, string> = { "5": "5min", "15": "15min", "60": "1hr", "D": "Daily", "W": "Weekly", "M": "Monthly" };
                 const tf = tfLabel[timeframe] || timeframe;
 
                 const lines: string[] = [];
                 lines.push(`📊 **${symbol}** — $${price.toFixed(2)} *(${tf})*`);
                 lines.push("");
 
-                if (smaShort !== null) {
-                    const ab = price >= smaShort ? "above" : "below";
-                    const emoji = price >= smaShort ? "🟢" : "🔴";
-                    const diff = ((price - smaShort) / smaShort * 100).toFixed(2);
-                    lines.push(`${emoji} **SMA ${shortPeriod}:** $${smaShort.toFixed(2)} (price ${ab}, ${diff}%)`);
-                }
+                const abShort = price >= smaShort ? "above" : "below";
+                const emojiShort = price >= smaShort ? "🟢" : "🔴";
+                const diffShort = ((price - smaShort) / smaShort * 100).toFixed(2);
+                lines.push(`${emojiShort} **SMA ${shortPeriod}:** $${smaShort.toFixed(2)} (price ${abShort}, ${diffShort}%)`);
 
-                if (smaLong !== null) {
-                    const ab = price >= smaLong ? "above" : "below";
-                    const emoji = price >= smaLong ? "🟢" : "🔴";
-                    const diff = ((price - smaLong) / smaLong * 100).toFixed(2);
-                    lines.push(`${emoji} **SMA ${longPeriod}:** $${smaLong.toFixed(2)} (price ${ab}, ${diff}%)`);
-                }
+                const abLong = price >= smaLong ? "above" : "below";
+                const emojiLong = price >= smaLong ? "🟢" : "🔴";
+                const diffLong = ((price - smaLong) / smaLong * 100).toFixed(2);
+                lines.push(`${emojiLong} **SMA ${longPeriod}:** $${smaLong.toFixed(2)} (price ${abLong}, ${diffLong}%)`);
 
-                if (smaShort !== null && smaLong !== null) {
-                    lines.push("");
-                    if (smaShort > smaLong) {
-                        lines.push(`⬆️ **Bullish** — SMA${shortPeriod} is above SMA${longPeriod}`);
-                    } else {
-                        lines.push(`⬇️ **Bearish** — SMA${shortPeriod} is below SMA${longPeriod}`);
-                    }
+                lines.push("");
+                if (smaShort > smaLong) {
+                    lines.push(`⬆️ **Bullish** — SMA${shortPeriod} is above SMA${longPeriod}`);
+                } else {
+                    lines.push(`⬇️ **Bearish** — SMA${shortPeriod} is below SMA${longPeriod}`);
                 }
 
                 return NextResponse.json({
