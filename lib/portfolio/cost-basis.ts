@@ -105,7 +105,7 @@ function computeFIFO(trades: TradeInput[]): PositionSummary {
     const shares = lots.reduce((sum, lot) => sum + lot.shares, 0);
     const costBasis = lots.reduce((sum, lot) => sum + lot.shares * lot.costPerShare, 0);
     const avgCostPerShare = shares > 0 ? costBasis / shares : 0;
-    const adjustedCostBasis = costBasis - optionsPremiumNet;
+    const adjustedCostBasis = costBasis - optionsPremiumNet - realizedPL;
 
     return {
         shares,
@@ -150,6 +150,7 @@ function computePerTradeFIFO(trades: TradeInput[]): TradeWithPL[] {
     const lots: { shares: number; costPerShare: number }[] = [];
     let optionsPremiumNet = 0;
     let dividendsReceived = 0;
+    let cumulativeRealizedPL = 0;
     const results: TradeWithPL[] = [];
 
     for (const trade of trades) {
@@ -175,6 +176,7 @@ function computePerTradeFIFO(trades: TradeInput[]): TradeWithPL[] {
                     remaining -= consumed;
                     if (oldest.shares <= 0) lots.shift();
                 }
+                cumulativeRealizedPL += realizedPL;
                 cashFlow = trade.totalAmount - trade.fees;
                 break;
             }
@@ -205,7 +207,7 @@ function computePerTradeFIFO(trades: TradeInput[]): TradeWithPL[] {
         const totalShares = lots.reduce((s, l) => s + l.shares, 0);
         const totalCost = lots.reduce((s, l) => s + l.shares * l.costPerShare, 0);
         const runningCostPerShare = totalShares > 0 ? totalCost / totalShares : 0;
-        const adjustedCost = totalCost - optionsPremiumNet - dividendsReceived;
+        const adjustedCost = totalCost - optionsPremiumNet - dividendsReceived - cumulativeRealizedPL;
         const runningAdjustedCostPerShare = totalShares > 0 ? adjustedCost / totalShares : 0;
 
         results.push({ ...trade, realizedPL, runningCostPerShare, runningAdjustedCostPerShare, cashFlow });
@@ -219,6 +221,7 @@ function computePerTradeAverage(trades: TradeInput[]): TradeWithPL[] {
     let costBasis = 0;
     let optionsPremiumNet = 0;
     let dividendsReceived = 0;
+    let cumulativeRealizedPL = 0;
     const results: TradeWithPL[] = [];
 
     for (const trade of trades) {
@@ -239,6 +242,7 @@ function computePerTradeAverage(trades: TradeInput[]): TradeWithPL[] {
                     const sellProceeds = trade.quantity * trade.pricePerShare - trade.fees;
                     const costOfSold = trade.quantity * avgCost;
                     realizedPL = sellProceeds - costOfSold;
+                    cumulativeRealizedPL += realizedPL;
                     costBasis -= costOfSold;
                     shares -= trade.quantity;
                     if (shares <= 0) { shares = 0; costBasis = 0; }
@@ -271,7 +275,7 @@ function computePerTradeAverage(trades: TradeInput[]): TradeWithPL[] {
         }
 
         const runningCostPerShare = shares > 0 ? costBasis / shares : 0;
-        const adjustedCost = costBasis - optionsPremiumNet - dividendsReceived;
+        const adjustedCost = costBasis - optionsPremiumNet - dividendsReceived - cumulativeRealizedPL;
         const runningAdjustedCostPerShare = shares > 0 ? adjustedCost / shares : 0;
 
         results.push({ ...trade, realizedPL, runningCostPerShare, runningAdjustedCostPerShare, cashFlow });
@@ -331,7 +335,7 @@ function computeAverage(trades: TradeInput[]): PositionSummary {
     }
 
     const avgCostPerShare = shares > 0 ? costBasis / shares : 0;
-    const adjustedCostBasis = costBasis - optionsPremiumNet;
+    const adjustedCostBasis = costBasis - optionsPremiumNet - realizedPL;
 
     // For average method, represent as single lot
     const lots: Lot[] = shares > 0

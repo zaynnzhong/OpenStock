@@ -82,7 +82,7 @@ export async function getPortfolioSummary(userId: string): Promise<PortfolioSumm
         const totalReturnPercent = pos.costBasis > 0 ? (totalReturn / pos.costBasis) * 100 : 0;
 
         const adjustedCostPerShare = pos.shares > 0
-            ? (pos.costBasis - pos.optionsPremiumNet - pos.dividendsReceived) / pos.shares
+            ? (pos.costBasis - pos.optionsPremiumNet - pos.dividendsReceived - pos.realizedPL) / pos.shares
             : 0;
 
         positions.push({
