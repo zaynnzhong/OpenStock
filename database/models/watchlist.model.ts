@@ -1,4 +1,4 @@
-import { Schema, model, models, type Document, type Model } from 'mongoose';
+import mongoose, { Schema, model, type Document, type Model } from 'mongoose';
 
 export interface WatchlistItem extends Document {
     userId: string;
@@ -24,5 +24,9 @@ const WatchlistSchema = new Schema<WatchlistItem>(
 // Prevent duplicate symbols per user
 WatchlistSchema.index({ userId: 1, symbol: 1 }, { unique: true });
 
-export const Watchlist: Model<WatchlistItem> =
-    (models?.Watchlist as Model<WatchlistItem>) || model<WatchlistItem>('Watchlist', WatchlistSchema);
+// Delete cached model to ensure schema changes are picked up across hot reloads
+if (mongoose.models.Watchlist) {
+    mongoose.deleteModel('Watchlist');
+}
+
+export const Watchlist: Model<WatchlistItem> = model<WatchlistItem>('Watchlist', WatchlistSchema);

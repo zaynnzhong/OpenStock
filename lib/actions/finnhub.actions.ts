@@ -49,27 +49,43 @@ export async function getCompanyProfile(symbol: string) {
 export async function getWatchlistData(symbols: string[]) {
     if (!symbols || symbols.length === 0) return [];
 
-    // Fetch quotes and profiles in parallel
-    const promises = symbols.map(async (sym) => {
-        const [quote, profile] = await Promise.all([
-            getQuote(sym),
-            getCompanyProfile(sym)
-        ]);
+    // Fetch in small batches of 4 to avoid bursting rate limit
+    const batchSize = 4;
+    const results: any[] = [];
 
-        return {
-            symbol: sym,
-            price: quote?.c || 0,
-            change: quote?.d || 0,
-            changePercent: quote?.dp || 0,
-            currency: profile?.currency || 'USD',
-            name: profile?.name || sym,
-            logo: profile?.logo,
-            marketCap: profile?.marketCapitalization,
-            peRatio: 0 // Finnhub 'quote' and 'profile2' don't easily give real-time PE. Might need 'metric' endpoint, but skipping for now to save rate limits.
-        };
-    });
+    for (let i = 0; i < symbols.length; i += batchSize) {
+        const batch = symbols.slice(i, i + batchSize);
 
-    return await Promise.all(promises);
+        const batchResults = await Promise.all(
+            batch.map(async (sym) => {
+                const [quote, profile] = await Promise.all([
+                    getQuote(sym),
+                    getCompanyProfile(sym)
+                ]);
+
+                return {
+                    symbol: sym,
+                    price: quote?.c || 0,
+                    change: quote?.d || 0,
+                    changePercent: quote?.dp || 0,
+                    currency: profile?.currency || 'USD',
+                    name: profile?.name || sym,
+                    logo: profile?.logo,
+                    marketCap: profile?.marketCapitalization,
+                    peRatio: 0,
+                };
+            })
+        );
+
+        results.push(...batchResults);
+
+        // Small delay between batches
+        if (i + batchSize < symbols.length) {
+            await new Promise((r) => setTimeout(r, 300));
+        }
+    }
+
+    return results;
 }
 
 

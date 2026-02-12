@@ -15,7 +15,13 @@ export async function PUT(req: NextRequest) {
             return NextResponse.json({ error: "DB not connected" }, { status: 500 });
         }
 
-        const updateData = { shares: Number(shares) || 0, avgCost: Number(avgCost) || 0 };
+        const updateData: Record<string, number> = {};
+        if (shares !== undefined) updateData.shares = Number(shares) || 0;
+        if (avgCost !== undefined) updateData.avgCost = Number(avgCost) || 0;
+
+        if (Object.keys(updateData).length === 0) {
+            return NextResponse.json({ error: "No fields to update" }, { status: 400 });
+        }
 
         const result = await db.collection("watchlists").findOneAndUpdate(
             { userId, symbol: symbol.toUpperCase() },

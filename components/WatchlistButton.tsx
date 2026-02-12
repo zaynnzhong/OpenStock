@@ -88,7 +88,21 @@ const WatchlistButton = ({
 
         try {
             if (userId) {
-                await addToWatchlist(userId, symbol, company, sharesNum, avgCostNum);
+                // First create the watchlist entry
+                await addToWatchlist(userId, symbol, company);
+                // Then set shares/avgCost via API (bypasses Mongoose model cache)
+                if (sharesNum > 0 || avgCostNum > 0) {
+                    await fetch("/api/holdings", {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            userId,
+                            symbol,
+                            shares: sharesNum,
+                            avgCost: avgCostNum,
+                        }),
+                    });
+                }
                 toast.success(`${symbol} added to watchlist`);
             }
             onWatchlistChange?.(symbol, true);

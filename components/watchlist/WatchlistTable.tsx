@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowUp, ArrowDown, Bell } from "lucide-react";
+import { ArrowUp, ArrowDown, Bell, Check, X } from "lucide-react";
 import CreateAlertModal from "./CreateAlertModal";
 import WatchlistButton from "@/components/WatchlistButton";
 import { formatCurrency, formatNumber } from "@/lib/utils";
@@ -15,11 +15,106 @@ interface WatchlistTableProps {
     onRefresh?: () => void;
 }
 
+function EditableCell({
+    value,
+    symbol,
+    field,
+    userId,
+    onSaved,
+    format,
+}: {
+    value: number;
+    symbol: string;
+    field: "shares" | "avgCost";
+    userId: string;
+    onSaved: (symbol: string, field: "shares" | "avgCost", newVal: number) => void;
+    format?: (v: number) => string;
+}) {
+    const [editing, setEditing] = useState(false);
+    const [draft, setDraft] = useState("");
+    const [saving, setSaving] = useState(false);
+    const inputRef = useRef<HTMLInputElement>(null);
+
+    const startEdit = () => {
+        setDraft(value > 0 ? String(value) : "");
+        setEditing(true);
+        setTimeout(() => inputRef.current?.focus(), 0);
+    };
+
+    const save = async () => {
+        const num = parseFloat(draft) || 0;
+        if (num === value) {
+            setEditing(false);
+            return;
+        }
+        setSaving(true);
+        try {
+            const body: any = { userId, symbol };
+            body[field] = num;
+            // We need to send both fields; fetch current other field from parent
+            const res = await fetch("/api/holdings", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+            if (res.ok) {
+                onSaved(symbol, field, num);
+            }
+        } catch (err) {
+            console.error("Failed to save:", err);
+        } finally {
+            setSaving(false);
+            setEditing(false);
+        }
+    };
+
+    const cancel = () => {
+        setEditing(false);
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key === "Enter") save();
+        if (e.key === "Escape") cancel();
+    };
+
+    if (editing) {
+        return (
+            <div className="flex items-center gap-1">
+                <input
+                    ref={inputRef}
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    onBlur={save}
+                    disabled={saving}
+                    className="w-20 bg-white/10 border border-white/20 rounded px-2 py-1 text-sm text-white outline-none focus:border-blue-500"
+                />
+            </div>
+        );
+    }
+
+    return (
+        <button
+            onClick={startEdit}
+            className="text-left hover:bg-white/10 rounded px-2 py-1 -mx-2 -my-1 transition-colors cursor-text group/cell"
+            title="Click to edit"
+        >
+            {value > 0 ? (
+                <span>{format ? format(value) : value}</span>
+            ) : (
+                <span className="text-gray-600 group-hover/cell:text-gray-400">—</span>
+            )}
+        </button>
+    );
+}
+
 export default function WatchlistTable({ data, userId, onRefresh }: WatchlistTableProps) {
     const [stocks, setStocks] = useState(data);
 
     useEffect(() => {
-        // Initial set if prop changes
         setStocks(data);
     }, [data]);
 
@@ -32,7 +127,6 @@ export default function WatchlistTable({ data, userId, onRefresh }: WatchlistTab
                 const symbols = stocks.map(s => s.symbol);
                 if (symbols.length === 0) return;
 
-                // Dynamic import to avoid server-action issues if directly imported in client component sometimes
                 const { getWatchlistData } = await import('@/lib/actions/finnhub.actions');
                 const updatedData = await getWatchlistData(symbols);
 
@@ -41,7 +135,8 @@ export default function WatchlistTable({ data, userId, onRefresh }: WatchlistTab
                         const map = new Map(updatedData.map(item => [item.symbol, item]));
                         return current.map(existing => {
                             const fresh = map.get(existing.symbol);
-                            if (fresh) {
+                            // Only update if we got a real price — never overwrite with $0
+                            if (fresh && fresh.price > 0) {
                                 return {
                                     ...existing,
                                     price: fresh.price,
@@ -59,7 +154,15 @@ export default function WatchlistTable({ data, userId, onRefresh }: WatchlistTab
         }, 30000);
 
         return () => clearInterval(interval);
-    }, [stocks]); // Re-create interval if list size changes
+    }, [stocks]);
+
+    const handleCellSaved = (symbol: string, field: "shares" | "avgCost", newVal: number) => {
+        setStocks(current =>
+            current.map(s =>
+                s.symbol === symbol ? { ...s, [field]: newVal } : s
+            )
+        );
+    };
 
     if (!stocks || stocks.length === 0) {
         return (
@@ -79,6 +182,9 @@ export default function WatchlistTable({ data, userId, onRefresh }: WatchlistTab
                         <th className="px-6 py-4 font-semibold tracking-wide">Symbol</th>
                         <th className="px-6 py-4 font-semibold tracking-wide">Price</th>
                         <th className="px-6 py-4 font-semibold tracking-wide">Change</th>
+                        <th className="px-6 py-4 font-semibold tracking-wide">Shares</th>
+                        <th className="px-6 py-4 font-semibold tracking-wide">Avg Cost</th>
+                        <th className="px-6 py-4 font-semibold tracking-wide">P/L</th>
                         <th className="px-6 py-4 font-semibold tracking-wide">Market Cap</th>
                         <th className="px-6 py-4 text-right font-semibold tracking-wide">Actions</th>
                     </tr>
@@ -86,6 +192,10 @@ export default function WatchlistTable({ data, userId, onRefresh }: WatchlistTab
                 <tbody className="divide-y divide-white/10">
                     {stocks.map((stock: any) => {
                         const isPositive = stock.change >= 0;
+                        const hasHoldings = stock.shares > 0 && stock.avgCost > 0 && stock.price > 0;
+                        const unrealizedPL = hasHoldings ? (stock.price - stock.avgCost) * stock.shares : 0;
+                        const unrealizedPLPercent = hasHoldings ? ((stock.price - stock.avgCost) / stock.avgCost) * 100 : 0;
+                        const plPositive = unrealizedPL >= 0;
                         return (
                             <tr key={stock.symbol} className="hover:bg-white/5 transition-colors group">
                                 <td className="px-6 py-4">
@@ -123,6 +233,35 @@ export default function WatchlistTable({ data, userId, onRefresh }: WatchlistTab
                                         {Math.abs(stock.changePercent).toFixed(2)}%
                                     </div>
                                 </td>
+                                <td className="px-6 py-4 text-gray-300 font-medium">
+                                    <EditableCell
+                                        value={stock.shares}
+                                        symbol={stock.symbol}
+                                        field="shares"
+                                        userId={userId}
+                                        onSaved={handleCellSaved}
+                                    />
+                                </td>
+                                <td className="px-6 py-4 text-gray-300 font-medium">
+                                    <EditableCell
+                                        value={stock.avgCost}
+                                        symbol={stock.symbol}
+                                        field="avgCost"
+                                        userId={userId}
+                                        onSaved={handleCellSaved}
+                                        format={(v) => formatCurrency(v)}
+                                    />
+                                </td>
+                                <td className="px-6 py-4 font-medium">
+                                    {hasHoldings ? (
+                                        <div className={`flex flex-col ${plPositive ? "text-green-400" : "text-red-400"}`}>
+                                            <span>{plPositive ? "+" : ""}${Math.abs(unrealizedPL).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                            <span className="text-xs opacity-75">{plPositive ? "+" : ""}{unrealizedPLPercent.toFixed(2)}%</span>
+                                        </div>
+                                    ) : (
+                                        <span className="text-gray-600">—</span>
+                                    )}
+                                </td>
                                 <td className="px-6 py-4 text-gray-400 font-medium">
                                     {formatNumber(stock.marketCap)}
                                 </td>
@@ -149,7 +288,6 @@ export default function WatchlistTable({ data, userId, onRefresh }: WatchlistTab
                                                 onWatchlistChange={async (sym, added) => {
                                                     if (!added) {
                                                         await removeFromWatchlist(userId, sym);
-                                                        // Update local list faster than full page refresh if you want
                                                         setStocks((curr: any[]) => curr.filter((s: any) => s.symbol !== sym));
                                                         if (onRefresh) onRefresh();
                                                     }

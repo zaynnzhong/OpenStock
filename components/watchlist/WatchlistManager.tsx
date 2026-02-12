@@ -3,16 +3,18 @@
 import React, { useState, useMemo } from 'react';
 import WatchlistStockChip from './WatchlistStockChip';
 import TradingViewWatchlist from './TradingViewWatchlist';
+import WatchlistTable from './WatchlistTable';
 import { Button } from '@/components/ui/button';
 import { ArrowDownAZ, ArrowUpZA, ArrowUpDown } from 'lucide-react';
 import { WatchlistItem } from '@/database/models/watchlist.model';
 
 interface WatchlistManagerProps {
-    initialItems: WatchlistItem[]; // Using the DB model type directly or a simplified version
+    initialItems: WatchlistItem[];
     userId: string;
+    tableData?: any[];
 }
 
-export default function WatchlistManager({ initialItems, userId }: WatchlistManagerProps) {
+export default function WatchlistManager({ initialItems, userId, tableData }: WatchlistManagerProps) {
     // Sort state: 'asc' (A-Z), 'desc' (Z-A), or null (added order/default)
     const [sortOrder, setSortOrder] = useState<'asc' | 'desc' | null>(null);
 
@@ -33,6 +35,18 @@ export default function WatchlistManager({ initialItems, userId }: WatchlistMana
             }
         });
     }, [initialItems, sortOrder]);
+
+    const sortedTableData = useMemo(() => {
+        if (!tableData || !sortOrder) return tableData;
+
+        return [...tableData].sort((a, b) => {
+            if (sortOrder === 'asc') {
+                return a.symbol.localeCompare(b.symbol);
+            } else {
+                return b.symbol.localeCompare(a.symbol);
+            }
+        });
+    }, [tableData, sortOrder]);
 
     const watchlistSymbols = sortedItems.map((item) => item.symbol);
 
@@ -86,6 +100,10 @@ export default function WatchlistManager({ initialItems, userId }: WatchlistMana
                     <p className="text-sm text-gray-500 italic">No stocks in watchlist.</p>
                 )}
             </div>
+
+            {sortedTableData && sortedTableData.length > 0 && (
+                <WatchlistTable data={sortedTableData} userId={userId} />
+            )}
 
             <div className="min-h-[550px]">
                 <TradingViewWatchlist symbols={watchlistSymbols} />

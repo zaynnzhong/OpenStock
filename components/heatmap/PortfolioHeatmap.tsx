@@ -130,7 +130,7 @@ export default function PortfolioHeatmap({ initialData, symbols, userId }: Portf
                         const fresh = freshMap.get(stock.symbol) as
                             | { price: number; change: number; changePercent: number }
                             | undefined;
-                        if (fresh) {
+                        if (fresh && fresh.price > 0) {
                             return {
                                 ...stock,
                                 price: fresh.price,

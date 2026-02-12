@@ -4,7 +4,7 @@ import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { getUserWatchlist } from '@/lib/actions/watchlist.actions';
 import { getUserAlerts } from '@/lib/actions/alert.actions';
-import { getNews } from '@/lib/actions/finnhub.actions';
+import { getNews, getWatchlistData } from '@/lib/actions/finnhub.actions';
 import WatchlistManager from '@/components/watchlist/WatchlistManager';
 import AlertsPanel from '@/components/watchlist/AlertsPanel';
 import NewsGrid from '@/components/watchlist/NewsGrid';
@@ -31,6 +31,32 @@ export default async function WatchlistPage() {
 
     const watchlistSymbols = watchlistItems.map((item: any) => item.symbol);
 
+    // Fetch stock prices for the table
+    let stockData: any[] = [];
+    if (watchlistSymbols.length > 0) {
+        try {
+            stockData = await getWatchlistData(watchlistSymbols);
+        } catch {
+            // Rate limit — table will show without prices
+        }
+    }
+
+    // Merge watchlist holdings with market data
+    const tableData = watchlistItems.map((item: any) => {
+        const market = stockData.find((s: any) => s.symbol === item.symbol);
+        return {
+            symbol: item.symbol,
+            name: market?.name || item.company || item.symbol,
+            logo: market?.logo || null,
+            price: market?.price || 0,
+            change: market?.change || 0,
+            changePercent: market?.changePercent || 0,
+            marketCap: market?.marketCap || 0,
+            shares: item.shares || 0,
+            avgCost: item.avgCost || 0,
+        };
+    });
+
     // Fallback news if watchlist has items
     const relevantNews = watchlistSymbols.length > 0 ? await getNews(watchlistSymbols) : news;
 
@@ -50,10 +76,10 @@ export default async function WatchlistPage() {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-                {/* Main Content - Watchlist Table */}
+                {/* Main Content */}
                 <div className="lg:col-span-3 space-y-8">
                     <div className="space-y-6">
-                        <WatchlistManager initialItems={watchlistItems} userId={userId} />
+                        <WatchlistManager initialItems={watchlistItems} userId={userId} tableData={tableData} />
                     </div>
 
                     {/* News Section */}
