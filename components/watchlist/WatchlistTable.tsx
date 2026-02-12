@@ -121,8 +121,7 @@ export default function WatchlistTable({ data, userId, onRefresh }: WatchlistTab
     useEffect(() => {
         if (!stocks || stocks.length === 0) return;
 
-        // Poll for price updates every 30 seconds
-        const interval = setInterval(async () => {
+        const pollPrices = async () => {
             try {
                 const symbols = stocks.map(s => s.symbol);
                 if (symbols.length === 0) return;
@@ -151,8 +150,16 @@ export default function WatchlistTable({ data, userId, onRefresh }: WatchlistTab
             } catch (err) {
                 console.error("Failed to poll watchlist prices", err);
             }
-        }, 30000);
+        };
 
+        // If any stock has $0 price, retry quickly to fill in missing data
+        const hasMissingPrices = stocks.some(s => !s.price || s.price === 0);
+        if (hasMissingPrices) {
+            const retryTimeout = setTimeout(pollPrices, 5000);
+            return () => clearTimeout(retryTimeout);
+        }
+
+        const interval = setInterval(pollPrices, 30000);
         return () => clearInterval(interval);
     }, [stocks]);
 

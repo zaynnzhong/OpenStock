@@ -26,8 +26,8 @@ export async function getQuote(symbol: string) {
     try {
         const token = NEXT_PUBLIC_FINNHUB_API_KEY;
         const url = `${FINNHUB_BASE_URL}/quote?symbol=${encodeURIComponent(symbol)}&token=${token}`;
-        // No caching for real-time price
-        return await fetchJSON<any>(url, 0);
+        // Cache for 15 seconds to avoid rate limit bursts across pages
+        return await fetchJSON<any>(url, 15);
     } catch (e) {
         console.error('Error fetching quote for', symbol, e);
         return null;

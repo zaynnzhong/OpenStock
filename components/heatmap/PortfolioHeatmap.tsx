@@ -149,9 +149,17 @@ export default function PortfolioHeatmap({ initialData, symbols, userId }: Portf
 
     useEffect(() => {
         if (symbols.length === 0) return;
+
+        // If any stock has $0 price, retry quickly
+        const hasMissingPrices = stocks.some(s => !s.price || s.price === 0);
+        if (hasMissingPrices) {
+            const retryTimeout = setTimeout(pollPrices, 5000);
+            return () => clearTimeout(retryTimeout);
+        }
+
         const interval = setInterval(pollPrices, 30000);
         return () => clearInterval(interval);
-    }, [pollPrices, symbols.length]);
+    }, [pollPrices, symbols.length, stocks]);
 
     const handleEditClick = (e: React.MouseEvent, stock: HeatmapStockData) => {
         e.preventDefault();
