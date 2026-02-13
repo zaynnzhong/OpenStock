@@ -126,6 +126,20 @@ Language composition
     - Dark theme by default
 - Keyboard shortcut
     - Cmd/Ctrl + K for quick actions/search
+- Portfolio & Trade Tracking
+    - CSV trade import with rolling cost-basis and realized P/L
+    - Per-trade P/L, cash flow coloring, and rolling cost column
+    - Trade logging with options premium support
+- Options Tools
+    - Black-Scholes pricing calculator with live Greeks (Delta, Gamma, Theta, Vega, Rho)
+    - Yahoo Finance options chain integration with real-time bid/ask, IV, volume, and open interest
+    - Multi-leg strategy builder with preset strategies (Bull Call Spread, Bear Put Spread, Long Straddle, Long Strangle, Iron Condor)
+    - Combined P/L analysis: net debit/credit, max profit/loss, breakeven detection
+    - Aggregated Greeks across all legs
+    - Interactive SVG payoff-at-expiration diagram with profit/loss regions and breakeven markers
+- Discord Bot Integration
+    - /trade, /position, /trades slash commands
+    - /options command for options pricing lookups
 
 ## 🤸 Quick Start <a name="quick-start"></a>
 
@@ -416,6 +430,7 @@ OpenStock is and will remain free and open for everyone. This project is license
 - [chinnsenn](https://github.com/chinnsenn) - Set up Docker configuration for the repository, ensuring a smooth development and deployment process.
 - [koevoet1221](https://github.com/koevoet1221) - Resolved MongoDB Docker build issues, improving the project’s overall stability and reliability.
 - [ettoreciolli1](https://github.com/ettoreciolli1) - updated Readme
+- [zaynnzhong](https://github.com/zaynnzhong) - Built portfolio trade tracking with rolling P/L, Black-Scholes options calculator, Yahoo Finance options chain integration, multi-leg strategy builder with payoff diagrams, and Discord bot slash commands.
 
 
 

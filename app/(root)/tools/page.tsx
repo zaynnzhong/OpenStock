@@ -1,5 +1,6 @@
-import { Calculator } from "lucide-react";
+import { Calculator, Layers } from "lucide-react";
 import OptionsCalculator from "@/components/tools/OptionsCalculator";
+import StrategyBuilder from "@/components/tools/StrategyBuilder";
 
 export const metadata = {
     title: "Tools | OpenStock",
@@ -25,6 +26,20 @@ export default function ToolsPage() {
 
                 <div className="bg-gray-900 border border-white/10 rounded-xl p-6">
                     <OptionsCalculator />
+                </div>
+            </section>
+
+            <section className="space-y-6">
+                <div className="flex items-center gap-3">
+                    <Layers className="text-teal-400 h-6 w-6" />
+                    <h2 className="text-xl font-semibold text-white">Options Strategy Builder</h2>
+                </div>
+                <p className="text-sm text-gray-400">
+                    Build multi-leg strategies — spreads, straddles, iron condors — with real-time P/L analysis, Greeks, and payoff diagrams.
+                </p>
+
+                <div className="bg-gray-900 border border-white/10 rounded-xl p-6">
+                    <StrategyBuilder />
                 </div>
             </section>
         </div>
