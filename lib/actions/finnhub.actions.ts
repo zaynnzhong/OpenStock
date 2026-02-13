@@ -107,6 +107,113 @@ export async function getHistoricalPrices(symbol: string, fromDate: string) {
     }
 }
 
+// Yahoo Finance crumb/cookie cache for options chain
+let yahooCrumbCache: { crumb: string; cookie: string; ts: number } | null = null;
+
+async function getYahooCrumb(): Promise<{ crumb: string; cookie: string }> {
+    // Reuse cached crumb for 30 minutes
+    if (yahooCrumbCache && Date.now() - yahooCrumbCache.ts < 30 * 60 * 1000) {
+        return yahooCrumbCache;
+    }
+
+    const cookieRes = await fetch("https://fc.yahoo.com", {
+        redirect: "manual",
+        headers: { "User-Agent": "Mozilla/5.0" },
+    });
+    const setCookie = cookieRes.headers.get("set-cookie") || "";
+
+    const crumbRes = await fetch("https://query2.finance.yahoo.com/v1/test/getcrumb", {
+        headers: {
+            "User-Agent": "Mozilla/5.0",
+            Cookie: setCookie,
+        },
+    });
+    const crumb = await crumbRes.text();
+
+    yahooCrumbCache = { crumb, cookie: setCookie, ts: Date.now() };
+    return yahooCrumbCache;
+}
+
+export interface OptionContract {
+    contractSymbol: string;
+    strike: number;
+    lastPrice: number;
+    bid: number;
+    ask: number;
+    volume: number;
+    openInterest: number;
+    impliedVolatility: number;
+    inTheMoney: boolean;
+    expiration: number;
+}
+
+export interface OptionsChainData {
+    symbol: string;
+    expirationDates: number[];       // unix timestamps
+    strikes: number[];
+    calls: OptionContract[];
+    puts: OptionContract[];
+    stockPrice: number;
+}
+
+export async function getOptionsChain(
+    symbol: string,
+    expirationTimestamp?: number
+): Promise<OptionsChainData | null> {
+    try {
+        const { crumb, cookie } = await getYahooCrumb();
+        const encodedCrumb = encodeURIComponent(crumb);
+        let url = `https://query2.finance.yahoo.com/v7/finance/options/${encodeURIComponent(symbol)}?crumb=${encodedCrumb}`;
+        if (expirationTimestamp) {
+            url += `&date=${expirationTimestamp}`;
+        }
+
+        const res = await fetch(url, {
+            headers: {
+                "User-Agent": "Mozilla/5.0",
+                Cookie: cookie,
+            },
+            cache: "no-store",
+        });
+
+        if (!res.ok) return null;
+        const data = await res.json();
+
+        const result = data?.optionChain?.result?.[0];
+        if (!result) return null;
+
+        const options = result.options?.[0] || {};
+        const stockPrice = result.quote?.regularMarketPrice || 0;
+
+        return {
+            symbol: symbol.toUpperCase(),
+            expirationDates: result.expirationDates || [],
+            strikes: result.strikes || [],
+            calls: (options.calls || []).map(mapContract),
+            puts: (options.puts || []).map(mapContract),
+            stockPrice,
+        };
+    } catch (e) {
+        console.error("Error fetching options chain for", symbol, e);
+        return null;
+    }
+}
+
+function mapContract(c: any): OptionContract {
+    return {
+        contractSymbol: c.contractSymbol || "",
+        strike: c.strike || 0,
+        lastPrice: c.lastPrice || 0,
+        bid: c.bid || 0,
+        ask: c.ask || 0,
+        volume: c.volume || 0,
+        openInterest: c.openInterest || 0,
+        impliedVolatility: c.impliedVolatility || 0,
+        inTheMoney: c.inTheMoney || false,
+        expiration: c.expiration || 0,
+    };
+}
+
 export async function getQuote(symbol: string) {
     try {
         const token = NEXT_PUBLIC_FINNHUB_API_KEY;
