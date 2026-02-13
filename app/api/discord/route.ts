@@ -3,6 +3,7 @@ import nacl from "tweetnacl";
 import { connectToDatabase } from "@/database/mongoose";
 import { Alert } from "@/database/models/alert.model";
 import { getQuote, getSMA } from "@/lib/actions/finnhub.actions";
+import { createTrade, getUserTrades, getPositionSummary } from "@/lib/actions/trade.actions";
 
 const DISCORD_PUBLIC_KEY = process.env.DISCORD_PUBLIC_KEY!;
 const USER_ID = process.env.DISCORD_BOT_USER_ID!;
@@ -214,6 +215,136 @@ export async function POST(req: NextRequest) {
                 return NextResponse.json({
                     type: CHANNEL_MESSAGE,
                     data: { content: "Failed to fetch SMA data." },
+                });
+            }
+        }
+
+        // /trade <type> <symbol> <quantity> <price> [date] [notes]
+        if (name === "trade") {
+            const type = options.find((o: any) => o.name === "type")?.value?.toUpperCase();
+            const symbol = options.find((o: any) => o.name === "symbol")?.value?.toUpperCase();
+            const quantity = options.find((o: any) => o.name === "quantity")?.value;
+            const price = options.find((o: any) => o.name === "price")?.value;
+            const date = options.find((o: any) => o.name === "date")?.value;
+            const notes = options.find((o: any) => o.name === "notes")?.value;
+
+            if (!type || !symbol || !quantity || !price) {
+                return NextResponse.json({
+                    type: CHANNEL_MESSAGE,
+                    data: { content: "Missing required fields. Usage: `/trade buy AAPL 10 150.00`" },
+                });
+            }
+
+            if (type !== "BUY" && type !== "SELL") {
+                return NextResponse.json({
+                    type: CHANNEL_MESSAGE,
+                    data: { content: "Type must be `buy` or `sell`." },
+                });
+            }
+
+            try {
+                const totalAmount = quantity * price;
+                const executedAt = date || new Date().toISOString().split("T")[0];
+
+                await createTrade({
+                    userId: USER_ID,
+                    symbol,
+                    type: type as TradeType,
+                    quantity,
+                    pricePerShare: price,
+                    totalAmount,
+                    executedAt,
+                    source: "discord",
+                    notes,
+                });
+
+                return NextResponse.json({
+                    type: CHANNEL_MESSAGE,
+                    data: {
+                        content: `✅ **${type} ${quantity} ${symbol}** @ $${price.toFixed(2)} = $${totalAmount.toFixed(2)} — logged`,
+                    },
+                });
+            } catch (err) {
+                console.error("Discord /trade error:", err);
+                return NextResponse.json({
+                    type: CHANNEL_MESSAGE,
+                    data: { content: "Failed to log trade. Please try again." },
+                });
+            }
+        }
+
+        // /position <symbol> — show position summary
+        if (name === "position") {
+            const symbol = options.find((o: any) => o.name === "symbol")?.value?.toUpperCase();
+            if (!symbol) {
+                return NextResponse.json({
+                    type: CHANNEL_MESSAGE,
+                    data: { content: "Usage: `/position AAPL`" },
+                });
+            }
+
+            try {
+                const position = await getPositionSummary(USER_ID, symbol);
+                if (!position || position.shares === 0) {
+                    return NextResponse.json({
+                        type: CHANNEL_MESSAGE,
+                        data: { content: `No open position for **${symbol}**.` },
+                    });
+                }
+
+                const lines = [
+                    `📊 **${symbol}** Position`,
+                    `Shares: **${position.shares}**`,
+                    `Avg Cost: **$${position.avgCostPerShare.toFixed(2)}**`,
+                    `Cost Basis: **$${position.costBasis.toFixed(2)}**`,
+                    `Realized P/L: **$${position.realizedPL.toFixed(2)}**`,
+                    `Adjusted Cost/Share: **$${(position.shares > 0 ? position.adjustedCostBasis / position.shares : 0).toFixed(2)}**`,
+                ];
+
+                return NextResponse.json({
+                    type: CHANNEL_MESSAGE,
+                    data: { content: lines.join("\n") },
+                });
+            } catch (err) {
+                console.error("Discord /position error:", err);
+                return NextResponse.json({
+                    type: CHANNEL_MESSAGE,
+                    data: { content: "Failed to fetch position." },
+                });
+            }
+        }
+
+        // /trades [symbol] — show last 10 trades
+        if (name === "trades") {
+            const symbol = options?.find((o: any) => o.name === "symbol")?.value?.toUpperCase();
+
+            try {
+                const { trades } = await getUserTrades(USER_ID, { symbol, limit: 10, sort: "desc" });
+
+                if (trades.length === 0) {
+                    const msg = symbol ? `No trades found for **${symbol}**.` : "No trades found.";
+                    return NextResponse.json({
+                        type: CHANNEL_MESSAGE,
+                        data: { content: msg },
+                    });
+                }
+
+                const header = symbol ? `**Last ${trades.length} trades for ${symbol}:**` : `**Last ${trades.length} trades:**`;
+                const lines = trades.map((t: TradeData) => {
+                    const date = new Date(t.executedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+                    const emoji = t.type === "BUY" ? "🟢" : t.type === "SELL" ? "🔴" : "⚪";
+                    return `${emoji} ${date} — **${t.type}** ${t.quantity} **${t.symbol}** @ $${t.pricePerShare.toFixed(2)}`;
+                });
+
+                return NextResponse.json({
+                    type: CHANNEL_MESSAGE,
+                    data: { content: `${header}\n${lines.join("\n")}` },
+                });
+            } catch (err) {
+                console.error("Discord /trades error:", err);
+                return NextResponse.json({
+                    type: CHANNEL_MESSAGE,
+                    data: { content: "Failed to fetch trades." },
                 });
             }
         }

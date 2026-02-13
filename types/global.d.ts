@@ -220,7 +220,7 @@ declare global {
     type TradeType = 'BUY' | 'SELL' | 'OPTION_PREMIUM' | 'DIVIDEND';
     type CostBasisMethod = 'FIFO' | 'AVERAGE';
     type OptionAction = 'BUY_TO_OPEN' | 'BUY_TO_CLOSE' | 'SELL_TO_OPEN' | 'SELL_TO_CLOSE';
-    type TradeSource = 'manual' | 'csv_robinhood' | 'csv_schwab' | 'csv_generic';
+    type TradeSource = 'manual' | 'csv_robinhood' | 'csv_schwab' | 'csv_generic' | 'discord';
 
     type TradeData = {
         _id: string;
