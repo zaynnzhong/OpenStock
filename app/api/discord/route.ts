@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import nacl from "tweetnacl";
+import mongoose from "mongoose";
 import { connectToDatabase } from "@/database/mongoose";
 import { Alert } from "@/database/models/alert.model";
 import { getQuote, getSMA } from "@/lib/actions/finnhub.actions";
@@ -7,7 +8,47 @@ import { createTrade, getUserTrades, getPositionSummary } from "@/lib/actions/tr
 import { blackScholes, daysToYears } from "@/lib/portfolio/options-pricing";
 
 const DISCORD_PUBLIC_KEY = process.env.DISCORD_PUBLIC_KEY!;
-const USER_ID = process.env.DISCORD_BOT_USER_ID!;
+
+// Resolve the web user ID from the database so Discord trades are stored
+// under the same user as the web portfolio. DISCORD_BOT_USER_ID can be
+// the Better Auth user id, MongoDB _id, or account email.
+let cachedUserId: string | null = null;
+
+async function resolveUserId(): Promise<string> {
+    if (cachedUserId) return cachedUserId;
+
+    await connectToDatabase();
+    const db = mongoose.connection.db!;
+    const configured = process.env.DISCORD_BOT_USER_ID || "";
+
+    if (configured) {
+        // Try matching by Better Auth id, MongoDB _id, or email
+        const orConditions: Record<string, unknown>[] = [
+            { id: configured },
+            { email: configured },
+        ];
+        // Only query by _id if it looks like a valid 24-char hex ObjectId
+        if (/^[a-f\d]{24}$/i.test(configured)) {
+            orConditions.push({ _id: new mongoose.Types.ObjectId(configured) });
+        }
+        const user = await db.collection("user").findOne({ $or: orConditions });
+        if (user) {
+            cachedUserId = (user.id as string) || String(user._id);
+            return cachedUserId;
+        }
+    }
+
+    // Fallback: use the first user in the database
+    const fallback = await db.collection("user").findOne({});
+    if (fallback) {
+        cachedUserId = (fallback.id as string) || String(fallback._id);
+        return cachedUserId;
+    }
+
+    // Last resort: use the env var as-is
+    cachedUserId = configured;
+    return cachedUserId;
+}
 
 // Discord interaction types
 const PING = 1;
@@ -61,9 +102,9 @@ export async function POST(req: NextRequest) {
             }
 
             try {
-                await connectToDatabase();
+                const userId = await resolveUserId();
                 await Alert.create({
-                    userId: USER_ID,
+                    userId,
                     symbol,
                     targetPrice: price,
                     condition: condition as "ABOVE" | "BELOW",
@@ -90,9 +131,9 @@ export async function POST(req: NextRequest) {
         // /alerts — list active alerts
         if (name === "alerts") {
             try {
-                await connectToDatabase();
+                const userId = await resolveUserId();
                 const alerts = await Alert.find({
-                    userId: USER_ID,
+                    userId,
                     active: true,
                     triggered: false,
                 }).sort({ createdAt: -1 }).limit(20).lean();
@@ -244,11 +285,12 @@ export async function POST(req: NextRequest) {
             }
 
             try {
+                const userId = await resolveUserId();
                 const totalAmount = quantity * price;
                 const executedAt = date || new Date().toISOString().split("T")[0];
 
                 await createTrade({
-                    userId: USER_ID,
+                    userId,
                     symbol,
                     type: type as TradeType,
                     quantity,
@@ -285,7 +327,8 @@ export async function POST(req: NextRequest) {
             }
 
             try {
-                const position = await getPositionSummary(USER_ID, symbol);
+                const userId = await resolveUserId();
+                const position = await getPositionSummary(userId, symbol);
                 if (!position || position.shares === 0) {
                     return NextResponse.json({
                         type: CHANNEL_MESSAGE,
@@ -389,7 +432,8 @@ export async function POST(req: NextRequest) {
             const symbol = options?.find((o: any) => o.name === "symbol")?.value?.toUpperCase();
 
             try {
-                const { trades } = await getUserTrades(USER_ID, { symbol, limit: 10, sort: "desc" });
+                const userId = await resolveUserId();
+                const { trades } = await getUserTrades(userId, { symbol, limit: 10, sort: "desc" });
 
                 if (trades.length === 0) {
                     const msg = symbol ? `No trades found for **${symbol}**.` : "No trades found.";
