@@ -4,6 +4,7 @@ import { connectToDatabase } from "@/database/mongoose";
 import { Alert } from "@/database/models/alert.model";
 import { getQuote, getSMA } from "@/lib/actions/finnhub.actions";
 import { createTrade, getUserTrades, getPositionSummary } from "@/lib/actions/trade.actions";
+import { blackScholes, daysToYears } from "@/lib/portfolio/options-pricing";
 
 const DISCORD_PUBLIC_KEY = process.env.DISCORD_PUBLIC_KEY!;
 const USER_ID = process.env.DISCORD_BOT_USER_ID!;
@@ -310,6 +311,75 @@ export async function POST(req: NextRequest) {
                 return NextResponse.json({
                     type: CHANNEL_MESSAGE,
                     data: { content: "Failed to fetch position." },
+                });
+            }
+        }
+
+        // /options <symbol> <strike> <expiration> <type> [volatility]
+        if (name === "options") {
+            const symbol = options.find((o: any) => o.name === "symbol")?.value?.toUpperCase();
+            const strike = options.find((o: any) => o.name === "strike")?.value;
+            const expiration = options.find((o: any) => o.name === "expiration")?.value;
+            const optType = options.find((o: any) => o.name === "type")?.value?.toLowerCase();
+            const vol = (options.find((o: any) => o.name === "volatility")?.value || 30) / 100;
+
+            if (!symbol || !strike || !expiration || !optType) {
+                return NextResponse.json({
+                    type: CHANNEL_MESSAGE,
+                    data: { content: "Usage: `/options AAPL 200 2025-06-20 call`" },
+                });
+            }
+
+            try {
+                const quote = await getQuote(symbol);
+                if (!quote?.c) {
+                    return NextResponse.json({
+                        type: CHANNEL_MESSAGE,
+                        data: { content: `Could not fetch price for **${symbol}**.` },
+                    });
+                }
+
+                const now = new Date();
+                now.setHours(0, 0, 0, 0);
+                const exp = new Date(expiration + "T00:00:00");
+                const days = Math.max(0, Math.ceil((exp.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
+
+                if (days <= 0) {
+                    return NextResponse.json({
+                        type: CHANNEL_MESSAGE,
+                        data: { content: "Expiration date must be in the future." },
+                    });
+                }
+
+                const result = blackScholes({
+                    stockPrice: quote.c,
+                    strikePrice: strike,
+                    timeToExpiry: daysToYears(days),
+                    riskFreeRate: 0.0425,
+                    volatility: vol,
+                    optionType: optType as "call" | "put",
+                });
+
+                const typeLabel = optType === "call" ? "Call" : "Put";
+                const lines = [
+                    `📐 **${symbol} ${typeLabel}** — Strike $${strike} | Exp ${expiration} (${days}d)`,
+                    `Stock: **$${quote.c.toFixed(2)}** | IV: **${(vol * 100).toFixed(0)}%**`,
+                    "",
+                    `💰 **Price: $${result.price.toFixed(4)}**`,
+                    `Delta: ${result.delta.toFixed(4)} | Gamma: ${result.gamma.toFixed(4)}`,
+                    `Theta: ${result.theta.toFixed(4)}/day | Vega: ${result.vega.toFixed(4)}`,
+                    `Rho: ${result.rho.toFixed(4)}`,
+                ];
+
+                return NextResponse.json({
+                    type: CHANNEL_MESSAGE,
+                    data: { content: lines.join("\n") },
+                });
+            } catch (err) {
+                console.error("Discord /options error:", err);
+                return NextResponse.json({
+                    type: CHANNEL_MESSAGE,
+                    data: { content: "Failed to calculate option price." },
                 });
             }
         }

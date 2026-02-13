@@ -1,9 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { createTrade } from "@/lib/actions/trade.actions";
+import { blackScholes, daysToYears } from "@/lib/portfolio/options-pricing";
+import { getQuote } from "@/lib/actions/finnhub.actions";
 
 interface AddTradeModalProps {
     userId: string;
@@ -261,6 +263,14 @@ export default function AddTradeModal({ userId, onTradeAdded, watchlistSymbols =
                         </div>
                     )}
 
+                    {/* Theoretical Price (Black-Scholes) */}
+                    {type === 'OPTION_PREMIUM' && showOptions && <TheoreticalPriceDisplay
+                        symbol={symbol}
+                        strikePrice={strikePrice}
+                        expDate={expDate}
+                        contractType={contractType}
+                    />}
+
                     {/* Notes */}
                     <div>
                         <label className="block text-xs text-gray-400 mb-1">Notes (optional)</label>
@@ -286,6 +296,66 @@ export default function AddTradeModal({ userId, onTradeAdded, watchlistSymbols =
                         </Button>
                     </div>
                 </form>
+            </div>
+        </div>
+    );
+}
+
+function TheoreticalPriceDisplay({
+    symbol,
+    strikePrice,
+    expDate,
+    contractType,
+}: {
+    symbol: string;
+    strikePrice: string;
+    expDate: string;
+    contractType: "CALL" | "PUT";
+}) {
+    const [currentPrice, setCurrentPrice] = useState<number | null>(null);
+
+    useEffect(() => {
+        const sym = symbol.trim().toUpperCase();
+        if (!sym) { setCurrentPrice(null); return; }
+        let cancelled = false;
+        getQuote(sym).then((q) => {
+            if (!cancelled && q?.c) setCurrentPrice(q.c);
+        }).catch(() => {});
+        return () => { cancelled = true; };
+    }, [symbol]);
+
+    const result = useMemo(() => {
+        const S = currentPrice;
+        const K = parseFloat(strikePrice);
+        if (!S || S <= 0 || !K || K <= 0 || !expDate) return null;
+
+        const now = new Date();
+        now.setHours(0, 0, 0, 0);
+        const exp = new Date(expDate + "T00:00:00");
+        const days = Math.max(0, Math.ceil((exp.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
+        if (days <= 0) return null;
+
+        return blackScholes({
+            stockPrice: S,
+            strikePrice: K,
+            timeToExpiry: daysToYears(days),
+            riskFreeRate: 0.0425,
+            volatility: 0.30,
+            optionType: contractType.toLowerCase() as "call" | "put",
+        });
+    }, [currentPrice, strikePrice, expDate, contractType]);
+
+    if (!result) return null;
+
+    return (
+        <div className="flex items-center gap-4 px-3 py-2 rounded-lg bg-purple-500/5 border border-purple-500/20 text-xs">
+            <div>
+                <span className="text-gray-500">Theoretical: </span>
+                <span className="text-white font-semibold">${result.price.toFixed(2)}</span>
+            </div>
+            <div>
+                <span className="text-gray-500">Delta: </span>
+                <span className="text-white">{result.delta.toFixed(3)}</span>
             </div>
         </div>
     );
