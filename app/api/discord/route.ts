@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import { after } from "next/server";
 import nacl from "tweetnacl";
 import mongoose from "mongoose";
 import { connectToDatabase } from "@/database/mongoose";
 import { Alert } from "@/database/models/alert.model";
-import { getQuote, getSMA } from "@/lib/actions/finnhub.actions";
+import { getQuote, getSMA, getOptionsChain, type OptionContract } from "@/lib/actions/finnhub.actions";
 import { createTrade, getUserTrades, getPositionSummary } from "@/lib/actions/trade.actions";
 import { blackScholes, daysToYears } from "@/lib/portfolio/options-pricing";
 
 const DISCORD_PUBLIC_KEY = process.env.DISCORD_PUBLIC_KEY!;
+const DISCORD_APP_ID = process.env.DISCORD_APP_ID!;
 
 // Resolve the web user ID from the database so Discord trades are stored
 // under the same user as the web portfolio. DISCORD_BOT_USER_ID can be
@@ -57,6 +59,7 @@ const APPLICATION_COMMAND = 2;
 // Discord response types
 const PONG = 1;
 const CHANNEL_MESSAGE = 4;
+const DEFERRED_CHANNEL_MESSAGE = 5;
 
 function verify(req: NextRequest, body: string): boolean {
     const signature = req.headers.get("x-signature-ed25519");
@@ -461,6 +464,216 @@ export async function POST(req: NextRequest) {
                     data: { content: "Failed to fetch trades." },
                 });
             }
+        }
+
+        // /target <symbol> — analyze bullish & bearish option strategies
+        if (name === "target") {
+            const symbol = options?.find((o: any) => o.name === "symbol")?.value?.toUpperCase();
+            if (!symbol) {
+                return NextResponse.json({
+                    type: CHANNEL_MESSAGE,
+                    data: { content: "Usage: `/target GOOG`" },
+                });
+            }
+
+            const token = interaction.token as string;
+
+            after(async () => {
+                const followupUrl = `https://discord.com/api/v10/webhooks/${DISCORD_APP_ID}/${token}`;
+                const sendFollowup = async (content: string) => {
+                    await fetch(followupUrl, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ content }),
+                    });
+                };
+
+                try {
+                    const [quote, sma, chain] = await Promise.all([
+                        getQuote(symbol),
+                        getSMA(symbol),
+                        getOptionsChain(symbol),
+                    ]);
+
+                    if (!quote?.c) {
+                        await sendFollowup(`Could not fetch price for **${symbol}**.`);
+                        return;
+                    }
+                    if (!chain || chain.strikes.length === 0 || chain.calls.length === 0) {
+                        await sendFollowup(`No options data available for **${symbol}**.`);
+                        return;
+                    }
+
+                    const price = quote.c;
+                    const strikes = chain.strikes;
+
+                    // Helpers
+                    const findNearest = (target: number, arr: number[]): number =>
+                        arr.reduce((best, s) => Math.abs(s - target) < Math.abs(best - target) ? s : best);
+
+                    const midPrice = (c: OptionContract | undefined): number => {
+                        if (!c) return 0;
+                        if (c.bid > 0 && c.ask > 0) return (c.bid + c.ask) / 2;
+                        return c.lastPrice || 0;
+                    };
+
+                    const findContract = (type: "call" | "put", strike: number) => {
+                        const contracts = type === "call" ? chain.calls : chain.puts;
+                        return contracts.find((c) => Math.abs(c.strike - strike) < 0.01);
+                    };
+
+                    // Auto-suggest targets using SMA momentum
+                    let bullTarget: number;
+                    let bearTarget: number;
+                    if (sma) {
+                        const momentum = Math.abs(price - sma.smaLong);
+                        let bullRaw = price + momentum;
+                        if (bullRaw < price * 1.05) bullRaw = price * 1.05;
+                        let bearRaw = price - momentum;
+                        if (bearRaw > price * 0.95) bearRaw = price * 0.95;
+                        if (bearRaw < 0) bearRaw = price * 0.9;
+                        bullTarget = findNearest(bullRaw, strikes);
+                        bearTarget = findNearest(bearRaw, strikes);
+                    } else {
+                        bullTarget = findNearest(price * 1.05, strikes);
+                        bearTarget = findNearest(price * 0.95, strikes);
+                    }
+
+                    const atmStrike = findNearest(price, strikes);
+
+                    // Expiration info
+                    const expTs = chain.expirationDates[0] || 0;
+                    const now = new Date();
+                    now.setHours(0, 0, 0, 0);
+                    const expDate = new Date(expTs * 1000);
+                    const daysToExpiry = Math.max(0, Math.ceil((expDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
+                    const r = 0.0425;
+
+                    // Build strategies for a direction and evaluate at expiry
+                    const buildAndEval = (direction: "bullish" | "bearish", target: number) => {
+                        const optionType: "call" | "put" = direction === "bullish" ? "call" : "put";
+                        const targetStrike = findNearest(target, strikes);
+
+                        const atmC = findContract(optionType, atmStrike);
+                        const targetC = findContract(optionType, targetStrike);
+                        const atmPrem = midPrice(atmC);
+                        const targetPrem = midPrice(targetC);
+                        const atmIV = atmC?.impliedVolatility || 0.3;
+                        const targetIV = targetC?.impliedVolatility || 0.3;
+
+                        type Strat = {
+                            name: string;
+                            legs: { side: "buy" | "sell"; strike: number; premium: number; iv: number; optionType: "call" | "put" }[];
+                        };
+
+                        const strats: Strat[] = [
+                            {
+                                name: `Long $${atmStrike} ${optionType === "call" ? "Call" : "Put"}`,
+                                legs: [{ side: "buy", strike: atmStrike, premium: atmPrem, iv: atmIV, optionType }],
+                            },
+                            {
+                                name: `Long $${targetStrike} ${optionType === "call" ? "Call" : "Put"}`,
+                                legs: [{ side: "buy", strike: targetStrike, premium: targetPrem, iv: targetIV, optionType }],
+                            },
+                        ];
+
+                        if (direction === "bullish") {
+                            strats.push({
+                                name: `Bull Spread $${atmStrike}/$${targetStrike}`,
+                                legs: [
+                                    { side: "buy", strike: atmStrike, premium: atmPrem, iv: atmIV, optionType: "call" },
+                                    { side: "sell", strike: targetStrike, premium: targetPrem, iv: targetIV, optionType: "call" },
+                                ],
+                            });
+                        } else {
+                            strats.push({
+                                name: `Bear Spread $${atmStrike}/$${targetStrike}`,
+                                legs: [
+                                    { side: "buy", strike: atmStrike, premium: atmPrem, iv: atmIV, optionType: "put" },
+                                    { side: "sell", strike: targetStrike, premium: targetPrem, iv: targetIV, optionType: "put" },
+                                ],
+                            });
+                        }
+
+                        // Evaluate each strategy at expiry (T=0 means intrinsic value)
+                        return strats.map((strat) => {
+                            const cost = strat.legs.reduce((s, l) => s + (l.side === "buy" ? l.premium : -l.premium) * 100, 0);
+                            const valueAtExpiry = strat.legs.reduce((s, l) => {
+                                const bs = blackScholes({
+                                    stockPrice: target,
+                                    strikePrice: l.strike,
+                                    timeToExpiry: 0,
+                                    riskFreeRate: r,
+                                    volatility: l.iv,
+                                    optionType: l.optionType,
+                                });
+                                return s + (l.side === "buy" ? bs.price : -bs.price) * 100;
+                            }, 0);
+                            const pl = valueAtExpiry - cost;
+                            const ret = cost !== 0 ? (pl / Math.abs(cost)) * 100 : 0;
+                            return { name: strat.name, cost, pl, ret };
+                        });
+                    };
+
+                    const bullResults = buildAndEval("bullish", bullTarget);
+                    const bearResults = buildAndEval("bearish", bearTarget);
+
+                    // Find best pick per direction (highest return%)
+                    const bestBull = bullResults.reduce((best, r) => r.ret > best.ret ? r : best);
+                    const bestBear = bearResults.reduce((best, r) => r.ret > best.ret ? r : best);
+
+                    // Build message
+                    const lines: string[] = [];
+
+                    // Header
+                    lines.push(`🎯 **${symbol} Target Price Analysis**`);
+
+                    // Price + SMA
+                    let statsLine = `📊 **$${price.toFixed(2)}**`;
+                    if (sma) {
+                        statsLine += ` | SMA20: $${sma.smaShort.toFixed(2)} | SMA50: $${sma.smaLong.toFixed(2)}`;
+                        if (price > sma.smaShort && sma.smaShort > sma.smaLong) {
+                            statsLine += " | ⬆️ Uptrend";
+                        } else if (price < sma.smaShort && sma.smaShort < sma.smaLong) {
+                            statsLine += " | ⬇️ Downtrend";
+                        } else {
+                            statsLine += " | ↔️ Mixed";
+                        }
+                    }
+                    lines.push(statsLine);
+
+                    const expLabel = expDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+                    lines.push(`📅 Exp: ${expLabel} (${daysToExpiry}d)`);
+                    lines.push("");
+
+                    // Bullish section
+                    const bullPct = ((bullTarget - price) / price * 100).toFixed(1);
+                    lines.push(`▲ **Bullish Target: $${bullTarget}** (+${bullPct}%)`);
+                    for (const r of bullResults) {
+                        const star = r === bestBull ? " ⭐" : "";
+                        const plSign = r.pl >= 0 ? "+" : "";
+                        lines.push(`  ${r.name}  $${Math.abs(r.cost).toFixed(0)} → ${plSign}$${r.pl.toFixed(0)} (${plSign}${r.ret.toFixed(1)}%)${star}`);
+                    }
+
+                    lines.push("");
+
+                    // Bearish section
+                    const bearPct = ((bearTarget - price) / price * 100).toFixed(1);
+                    lines.push(`▼ **Bearish Target: $${bearTarget}** (${bearPct}%)`);
+                    for (const r of bearResults) {
+                        const star = r === bestBear ? " ⭐" : "";
+                        const plSign = r.pl >= 0 ? "+" : "";
+                        lines.push(`  ${r.name}  $${Math.abs(r.cost).toFixed(0)} → ${plSign}$${r.pl.toFixed(0)} (${plSign}${r.ret.toFixed(1)}%)${star}`);
+                    }
+
+                    await sendFollowup(lines.join("\n"));
+                } catch (err) {
+                    console.error("Discord /target error:", err);
+                    await sendFollowup("Failed to analyze target price. Please try again.");
+                }
+            });
+
+            return NextResponse.json({ type: DEFERRED_CHANNEL_MESSAGE });
         }
     }
 
