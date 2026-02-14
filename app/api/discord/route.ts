@@ -675,6 +675,192 @@ export async function POST(req: NextRequest) {
 
             return NextResponse.json({ type: DEFERRED_CHANNEL_MESSAGE });
         }
+
+        // /leap <symbol> — find optimal deep ITM LEAP call for stock replacement
+        if (name === "leap") {
+            const symbol = options?.find((o: any) => o.name === "symbol")?.value?.toUpperCase();
+            if (!symbol) {
+                return NextResponse.json({
+                    type: CHANNEL_MESSAGE,
+                    data: { content: "Usage: `/leap GOOG`" },
+                });
+            }
+
+            const token = interaction.token as string;
+
+            after(async () => {
+                const followupUrl = `https://discord.com/api/v10/webhooks/${DISCORD_APP_ID}/${token}`;
+                const sendFollowup = async (content: string) => {
+                    await fetch(followupUrl, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ content }),
+                    });
+                };
+
+                try {
+                    const [quote, sma, chain] = await Promise.all([
+                        getQuote(symbol),
+                        getSMA(symbol),
+                        getOptionsChain(symbol),
+                    ]);
+
+                    if (!quote?.c) {
+                        await sendFollowup(`Could not fetch price for **${symbol}**.`);
+                        return;
+                    }
+                    if (!chain || chain.expirationDates.length === 0) {
+                        await sendFollowup(`No options data available for **${symbol}**.`);
+                        return;
+                    }
+
+                    const price = quote.c;
+
+                    // Find LEAP expirations (>180 days)
+                    const now = new Date();
+                    now.setHours(0, 0, 0, 0);
+                    const nowMs = now.getTime();
+                    const leapExps = chain.expirationDates.filter((ts) => {
+                        const days = Math.ceil((ts * 1000 - nowMs) / (1000 * 60 * 60 * 24));
+                        return days > 180;
+                    });
+
+                    if (leapExps.length === 0) {
+                        await sendFollowup(`No LEAP expirations (>180 days) found for **${symbol}**.`);
+                        return;
+                    }
+
+                    // Use the longest LEAP expiration
+                    const longestExp = leapExps[leapExps.length - 1];
+                    const leapChain = await getOptionsChain(symbol, longestExp);
+                    if (!leapChain || leapChain.calls.length === 0) {
+                        await sendFollowup(`No call options found for **${symbol}** LEAP expiration.`);
+                        return;
+                    }
+
+                    const expDate = new Date(longestExp * 1000);
+                    const daysToExp = Math.max(0, Math.ceil((expDate.getTime() - nowMs) / (1000 * 60 * 60 * 24)));
+                    const T = daysToYears(daysToExp);
+                    const r = 0.0425;
+
+                    const midPriceCalc = (c: OptionContract): number => {
+                        if (c.bid > 0 && c.ask > 0) return (c.bid + c.ask) / 2;
+                        return c.lastPrice || 0;
+                    };
+
+                    // Compute candidates
+                    interface LeapRow {
+                        strike: number;
+                        premium: number;
+                        intrinsic: number;
+                        extrinsic: number;
+                        delta: number;
+                        annCost: number;
+                        breakEven: number;
+                        bePct: number;
+                        oi: number;
+                    }
+
+                    const candidates: LeapRow[] = leapChain.calls
+                        .filter((c) => c.strike < price)
+                        .map((contract) => {
+                            const premium = midPriceCalc(contract);
+                            if (premium <= 0) return null;
+                            const iv = contract.impliedVolatility || 0.3;
+                            const bs = blackScholes({
+                                stockPrice: price,
+                                strikePrice: contract.strike,
+                                timeToExpiry: T,
+                                riskFreeRate: r,
+                                volatility: iv,
+                                optionType: "call",
+                            });
+                            if (bs.delta < 0.70) return null;
+
+                            const intrinsic = price - contract.strike;
+                            const extrinsic = Math.max(premium - intrinsic, 0);
+                            const annCost = (extrinsic / price) / (daysToExp / 365) * 100;
+                            const breakEven = contract.strike + premium;
+                            const bePct = ((breakEven - price) / price) * 100;
+
+                            return {
+                                strike: contract.strike,
+                                premium,
+                                intrinsic,
+                                extrinsic,
+                                delta: bs.delta,
+                                annCost,
+                                breakEven,
+                                bePct,
+                                oi: contract.openInterest,
+                            } as LeapRow;
+                        })
+                        .filter((c): c is LeapRow => c !== null)
+                        .sort((a, b) => b.strike - a.strike);
+
+                    if (candidates.length === 0) {
+                        await sendFollowup(`No qualifying deep ITM LEAP calls found for **${symbol}**.`);
+                        return;
+                    }
+
+                    // Sweet spot: delta 0.80-0.90, lowest annualized cost
+                    const sweetCandidates = candidates.filter((c) => c.delta >= 0.80 && c.delta <= 0.90);
+                    const sweetSpot = sweetCandidates.length > 0
+                        ? sweetCandidates.reduce((best, c) => c.annCost < best.annCost ? c : best)
+                        : null;
+
+                    // Build message
+                    const lines: string[] = [];
+                    const expLabel = expDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+
+                    lines.push(`🔭 **${symbol} Deep ITM LEAP Analysis**`);
+
+                    let statsLine = `📊 **$${price.toFixed(2)}**`;
+                    if (sma) {
+                        statsLine += ` | SMA20: $${sma.smaShort.toFixed(2)} | SMA50: $${sma.smaLong.toFixed(2)}`;
+                        if (price > sma.smaShort && sma.smaShort > sma.smaLong) {
+                            statsLine += " | ⬆️ Uptrend";
+                        } else if (price < sma.smaShort && sma.smaShort < sma.smaLong) {
+                            statsLine += " | ⬇️ Downtrend";
+                        } else {
+                            statsLine += " | ↔️ Mixed";
+                        }
+                    }
+                    lines.push(statsLine);
+                    lines.push(`📅 Exp: ${expLabel} (${daysToExp}d)`);
+                    lines.push("");
+
+                    // Code-block table
+                    lines.push("```");
+                    lines.push("Strike  Prem    Delta  Ann%   B/E%    OI");
+                    lines.push("------  ------  -----  -----  ------  ------");
+                    for (const c of candidates.slice(0, 12)) {
+                        const marker = sweetSpot && c.strike === sweetSpot.strike ? ">" : " ";
+                        const strikeStr = `$${c.strike.toFixed(0)}`.padEnd(7);
+                        const premStr = `$${c.premium.toFixed(1)}`.padEnd(7);
+                        const deltaStr = c.delta.toFixed(2).padEnd(6);
+                        const annStr = `${c.annCost.toFixed(1)}%`.padEnd(6);
+                        const beStr = `${c.bePct >= 0 ? "+" : ""}${c.bePct.toFixed(1)}%`.padEnd(7);
+                        const oiStr = c.oi.toLocaleString();
+                        lines.push(`${marker}${strikeStr}${premStr}${deltaStr}${annStr}${beStr}${oiStr}`);
+                    }
+                    lines.push("```");
+
+                    // Best pick summary
+                    if (sweetSpot) {
+                        lines.push("");
+                        lines.push(`⭐ **Best Pick: $${sweetSpot.strike.toFixed(0)} Call** — Delta ${sweetSpot.delta.toFixed(2)}, ${sweetSpot.annCost.toFixed(2)}% ann. cost, B/E ${sweetSpot.bePct >= 0 ? "+" : ""}${sweetSpot.bePct.toFixed(1)}%`);
+                    }
+
+                    await sendFollowup(lines.join("\n"));
+                } catch (err) {
+                    console.error("Discord /leap error:", err);
+                    await sendFollowup("Failed to analyze LEAP options. Please try again.");
+                }
+            });
+
+            return NextResponse.json({ type: DEFERRED_CHANNEL_MESSAGE });
+        }
     }
 
     return NextResponse.json({ type: PONG });

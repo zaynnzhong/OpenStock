@@ -1,7 +1,8 @@
-import { Calculator, Layers, Target } from "lucide-react";
+import { Calculator, Layers, Target, Telescope } from "lucide-react";
 import OptionsCalculator from "@/components/tools/OptionsCalculator";
 import StrategyBuilder from "@/components/tools/StrategyBuilder";
 import TargetPriceAnalyzer from "@/components/tools/TargetPriceAnalyzer";
+import DeepITMLeapFinder from "@/components/tools/DeepITMLeapFinder";
 
 export const metadata = {
     title: "Tools | OpenStock",
@@ -55,6 +56,20 @@ export default function ToolsPage() {
 
                 <div className="bg-gray-900 border border-white/10 rounded-xl p-6">
                     <TargetPriceAnalyzer />
+                </div>
+            </section>
+
+            <section className="space-y-6">
+                <div className="flex items-center gap-3">
+                    <Telescope className="text-teal-400 h-6 w-6" />
+                    <h2 className="text-xl font-semibold text-white">Deep ITM LEAP Finder</h2>
+                </div>
+                <p className="text-sm text-gray-400">
+                    Find the optimal deep in-the-money LEAP call for stock replacement — ranked by delta, leverage, and annualized time-value cost.
+                </p>
+
+                <div className="bg-gray-900 border border-white/10 rounded-xl p-6">
+                    <DeepITMLeapFinder />
                 </div>
             </section>
         </div>
