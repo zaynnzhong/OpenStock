@@ -290,6 +290,30 @@ export async function syncWatchlistFromTrades(userId: string, symbol: string) {
     );
 }
 
+export async function renameSymbol(userId: string, fromSymbol: string, toSymbol: string): Promise<number> {
+    await connectToDatabase();
+
+    const from = fromSymbol.toUpperCase();
+    const to = toSymbol.toUpperCase();
+
+    const result = await Trade.updateMany(
+        { userId, symbol: from },
+        { $set: { symbol: to } }
+    );
+
+    if (result.modifiedCount > 0) {
+        // Sync watchlist for both old and new symbols
+        await Promise.all([
+            syncWatchlistFromTrades(userId, from),
+            syncWatchlistFromTrades(userId, to),
+        ]);
+        revalidatePath('/portfolio');
+        revalidatePath('/watchlist');
+    }
+
+    return result.modifiedCount;
+}
+
 export async function hasTradesForSymbol(userId: string, symbol: string): Promise<boolean> {
     await connectToDatabase();
     const count = await Trade.countDocuments({ userId, symbol: symbol.toUpperCase() });
