@@ -32,13 +32,17 @@ export interface ParseResult {
     format: TradeSource;
 }
 
-type BrokerFormat = 'csv_robinhood' | 'csv_schwab' | 'csv_generic';
+type BrokerFormat = 'csv_robinhood' | 'csv_schwab' | 'csv_wealthsimple' | 'csv_generic';
 
 export function detectBrokerFormat(headerLine: string): BrokerFormat {
     const lower = headerLine.toLowerCase();
 
     if (lower.includes('activity date') && lower.includes('instrument') && lower.includes('trans code')) {
         return 'csv_robinhood';
+    }
+
+    if (lower.includes('account_id') && lower.includes('activity_sub_type') && lower.includes('net_cash_amount')) {
+        return 'csv_wealthsimple';
     }
 
     if (lower.includes('action') && lower.includes('symbol') && lower.includes('quantity') && lower.includes('price') && (lower.includes('fees') || lower.includes('commission'))) {
@@ -62,6 +66,8 @@ export function parseCSV(content: string, format?: BrokerFormat): ParseResult {
             return parseRobinhood(lines, detectedFormat);
         case 'csv_schwab':
             return parseSchwab(lines, detectedFormat);
+        case 'csv_wealthsimple':
+            return parseWealthsimple(lines, detectedFormat);
         default:
             return parseGeneric(lines, detectedFormat);
     }
@@ -230,6 +236,160 @@ function parseSchwab(lines: string[], format: TradeSource): ParseResult {
             });
         } catch {
             errors.push({ row: i + 1, message: 'Failed to parse row', raw: line });
+        }
+    }
+
+    return { trades, errors, format };
+}
+
+// Wealthsimple CSV format — processes per-account to compute correct ACB
+function parseWealthsimple(lines: string[], format: TradeSource): ParseResult {
+    const trades: ParsedTrade[] = [];
+    const errors: ParseError[] = [];
+    const headers = splitCSVLine(lines[0]).map(h => h.toLowerCase().trim());
+
+    const idx = {
+        date: headers.indexOf('transaction_date'),
+        symbol: headers.findIndex(h => h === 'symbol'),
+        type: headers.indexOf('activity_sub_type'),
+        quantity: headers.indexOf('quantity'),
+        price: headers.indexOf('unit_price'),
+        fees: headers.indexOf('commission'),
+        total: headers.indexOf('net_cash_amount'),
+        accountId: headers.indexOf('account_id'),
+        notes: headers.findIndex(h => h === 'name'),
+    };
+
+    if (idx.date === -1 || idx.symbol === -1) {
+        return {
+            trades: [],
+            errors: [{ row: 1, message: 'CSV must have transaction_date and symbol columns', raw: lines[0] }],
+            format,
+        };
+    }
+
+    interface RawTrade {
+        accountId: string;
+        symbol: string;
+        type: TradeType;
+        quantity: number;
+        price: number;
+        fees: number;
+        total: number;
+        executedAt: Date;
+        notes?: string;
+    }
+
+    const rawTrades: RawTrade[] = [];
+
+    for (let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+
+        try {
+            const fields = splitCSVLine(line);
+            const dateStr = fields[idx.date] || '';
+            const symbol = (fields[idx.symbol] || '').toUpperCase();
+            const rawType = idx.type >= 0 ? (fields[idx.type] || '') : '';
+            const rawQuantity = parseNumber(idx.quantity >= 0 ? fields[idx.quantity] : '0');
+            const quantity = Math.abs(rawQuantity);
+            const price = Math.abs(parseNumber(idx.price >= 0 ? fields[idx.price] : '0'));
+            const fees = Math.abs(parseNumber(idx.fees >= 0 ? fields[idx.fees] : '0'));
+            const total = parseNumber(idx.total >= 0 ? fields[idx.total] : '0');
+            const accountId = idx.accountId >= 0 ? (fields[idx.accountId] || 'default') : 'default';
+            const notes = idx.notes >= 0 ? fields[idx.notes] : undefined;
+
+            const executedAt = parseDate(dateStr);
+            if (!executedAt || !symbol) {
+                errors.push({ row: i + 1, message: 'Missing date or symbol', raw: line });
+                continue;
+            }
+
+            const type = inferTradeType(rawType, rawQuantity, total);
+            if (!type) {
+                errors.push({ row: i + 1, message: `Cannot determine trade type from "${rawType}"`, raw: line });
+                continue;
+            }
+
+            rawTrades.push({
+                accountId,
+                symbol,
+                type,
+                quantity: quantity || 1,
+                price: price || (quantity > 0 ? Math.abs(total) / quantity : 0),
+                fees,
+                total: Math.abs(total) || (quantity * price),
+                executedAt,
+                notes,
+            });
+        } catch {
+            errors.push({ row: i + 1, message: 'Failed to parse row', raw: line });
+        }
+    }
+
+    // Group by (account, symbol) so sells only affect their own account's cost basis
+    const groups = new Map<string, RawTrade[]>();
+    for (const t of rawTrades) {
+        const key = `${t.accountId}::${t.symbol}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key)!.push(t);
+    }
+
+    for (const [, groupTrades] of groups) {
+        groupTrades.sort((a, b) => a.executedAt.getTime() - b.executedAt.getTime());
+
+        const hasSells = groupTrades.some(t => t.type === 'SELL');
+
+        if (!hasSells) {
+            // No sells in this account — output all buys as-is
+            for (const t of groupTrades) {
+                trades.push({
+                    symbol: t.symbol,
+                    type: t.type,
+                    quantity: t.quantity,
+                    pricePerShare: t.price,
+                    totalAmount: t.total,
+                    fees: t.fees,
+                    executedAt: t.executedAt,
+                    source: format,
+                    notes: t.notes,
+                });
+            }
+        } else {
+            // Has sells — compute per-account average cost, output net position
+            let shares = 0;
+            let costBasis = 0;
+            let earliestDate = groupTrades[0].executedAt;
+            const sym = groupTrades[0].symbol;
+
+            for (const t of groupTrades) {
+                if (t.type === 'BUY') {
+                    costBasis += t.quantity * t.price + t.fees;
+                    shares += t.quantity;
+                } else if (t.type === 'SELL') {
+                    if (shares > 0) {
+                        const avg = costBasis / shares;
+                        costBasis -= t.quantity * avg;
+                        shares -= t.quantity;
+                        if (shares <= 0) { shares = 0; costBasis = 0; }
+                    }
+                }
+            }
+
+            if (shares > 0) {
+                const avgCost = costBasis / shares;
+                trades.push({
+                    symbol: sym,
+                    type: 'BUY',
+                    quantity: shares,
+                    pricePerShare: avgCost,
+                    totalAmount: costBasis,
+                    fees: 0,
+                    executedAt: earliestDate,
+                    source: format,
+                    notes: `Consolidated from Wealthsimple account`,
+                });
+            }
         }
     }
 

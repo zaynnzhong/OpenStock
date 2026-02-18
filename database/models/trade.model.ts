@@ -2,7 +2,7 @@ import mongoose, { Schema, model, type Document, type Model } from 'mongoose';
 
 export type TradeType = 'BUY' | 'SELL' | 'OPTION_PREMIUM' | 'DIVIDEND';
 export type OptionAction = 'BUY_TO_OPEN' | 'BUY_TO_CLOSE' | 'SELL_TO_OPEN' | 'SELL_TO_CLOSE';
-export type TradeSource = 'manual' | 'csv_robinhood' | 'csv_schwab' | 'csv_generic' | 'discord';
+export type TradeSource = 'manual' | 'csv_robinhood' | 'csv_schwab' | 'csv_wealthsimple' | 'csv_generic' | 'discord';
 
 export interface OptionDetails {
     contractType: 'CALL' | 'PUT';
@@ -54,7 +54,7 @@ const TradeSchema = new Schema<TradeDocument>(
         optionDetails: { type: OptionDetailsSchema, default: undefined },
         notes: { type: String, default: undefined },
         executedAt: { type: Date, required: true },
-        source: { type: String, enum: ['manual', 'csv_robinhood', 'csv_schwab', 'csv_generic', 'discord'], default: 'manual' },
+        source: { type: String, enum: ['manual', 'csv_robinhood', 'csv_schwab', 'csv_wealthsimple', 'csv_generic', 'discord'], default: 'manual' },
         importBatchId: { type: String, default: undefined },
     },
     { timestamps: true }

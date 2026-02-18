@@ -122,7 +122,7 @@ export async function getUserTrades(
 export async function previewCSVImport(
     userId: string,
     csvContent: string,
-    format?: 'csv_robinhood' | 'csv_schwab' | 'csv_generic'
+    format?: 'csv_robinhood' | 'csv_schwab' | 'csv_wealthsimple' | 'csv_generic'
 ): Promise<ParseResult> {
     return parseCSV(csvContent, format);
 }
