@@ -89,11 +89,17 @@ function PositionRow({
     realizedPositive: boolean;
     onToggle: () => void;
 }) {
+    const stockPL = pos.realizedPL - pos.optionsPremiumNet;
+    const hasStockPL = stockPL !== 0;
+    const hasOptionPL = pos.optionsPremiumNet !== 0;
+    const hasDividends = pos.dividendsReceived > 0;
+    const hasBreakdown = hasStockPL || hasOptionPL || hasDividends;
+
     return (
         <>
             <tr className="hover:bg-white/5 transition-colors cursor-pointer" onClick={onToggle}>
                 <td className="px-4 py-3">
-                    {pos.lots.length > 0 && (
+                    {hasBreakdown && (
                         isExpanded
                             ? <ChevronDown className="w-4 h-4 text-gray-500" />
                             : <ChevronRight className="w-4 h-4 text-gray-500" />
@@ -143,19 +149,42 @@ function PositionRow({
                     <Badge variant="outline" className="text-[10px]">{pos.costBasisMethod}</Badge>
                 </td>
             </tr>
-            {isExpanded && pos.lots.length > 0 && (
-                pos.lots.map((lot, i) => (
-                    <tr key={`${pos.symbol}-lot-${i}`} className="bg-white/[0.02]">
-                        <td className="px-4 py-2"></td>
-                        <td className="px-4 py-2 text-xs text-gray-500 pl-8">Lot {i + 1}</td>
-                        <td className="px-4 py-2 text-xs text-gray-400">{lot.shares.toFixed(lot.shares % 1 !== 0 ? 4 : 0)}</td>
-                        <td className="px-4 py-2 text-xs text-gray-400">{formatCurrency(lot.costPerShare)}</td>
-                        <td className="px-4 py-2 text-xs text-gray-500" colSpan={3}>
-                            Purchased {new Date(lot.date).toLocaleDateString()}
-                        </td>
-                        <td className="px-4 py-2 text-xs text-gray-500" colSpan={3}></td>
-                    </tr>
-                ))
+            {isExpanded && hasBreakdown && (
+                <>
+                    {hasStockPL && (
+                        <tr className="bg-white/[0.02]">
+                            <td className="px-4 py-2"></td>
+                            <td className="px-4 py-2 text-xs text-gray-500 pl-8">Stock P/L</td>
+                            <td className="px-4 py-2" colSpan={6}></td>
+                            <td className={`px-4 py-2 text-xs font-medium ${stockPL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                {stockPL >= 0 ? '+' : ''}{formatCurrency(stockPL)}
+                            </td>
+                            <td className="px-4 py-2"></td>
+                        </tr>
+                    )}
+                    {hasOptionPL && (
+                        <tr className="bg-white/[0.02]">
+                            <td className="px-4 py-2"></td>
+                            <td className="px-4 py-2 text-xs text-purple-400 pl-8">Options P/L</td>
+                            <td className="px-4 py-2" colSpan={6}></td>
+                            <td className={`px-4 py-2 text-xs font-medium ${pos.optionsPremiumNet >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                {pos.optionsPremiumNet >= 0 ? '+' : ''}{formatCurrency(pos.optionsPremiumNet)}
+                            </td>
+                            <td className="px-4 py-2"></td>
+                        </tr>
+                    )}
+                    {hasDividends && (
+                        <tr className="bg-white/[0.02]">
+                            <td className="px-4 py-2"></td>
+                            <td className="px-4 py-2 text-xs text-blue-400 pl-8">Dividends</td>
+                            <td className="px-4 py-2" colSpan={6}></td>
+                            <td className="px-4 py-2 text-xs font-medium text-green-400">
+                                +{formatCurrency(pos.dividendsReceived)}
+                            </td>
+                            <td className="px-4 py-2"></td>
+                        </tr>
+                    )}
+                </>
             )}
         </>
     );

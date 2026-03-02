@@ -334,6 +334,7 @@ export async function getTradesWithPL(
     userId: string,
     options: {
         symbol?: string;
+        type?: 'stock' | 'option';
         limit?: number;
         offset?: number;
         sort?: 'asc' | 'desc';
@@ -341,10 +342,12 @@ export async function getTradesWithPL(
 ) {
     await connectToDatabase();
 
-    const { symbol, limit = 50, offset = 0, sort = 'desc' } = options;
+    const { symbol, type, limit = 50, offset = 0, sort = 'desc' } = options;
 
     const query: any = { userId };
     if (symbol) query.symbol = symbol.toUpperCase();
+    if (type === 'stock') query.type = { $in: ['BUY', 'SELL', 'DIVIDEND'] };
+    if (type === 'option') query.type = 'OPTION_PREMIUM';
 
     const [allTrades, total] = await Promise.all([
         Trade.find(query).sort({ executedAt: 1 }).lean(),

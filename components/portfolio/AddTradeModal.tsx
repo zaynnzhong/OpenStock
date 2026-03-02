@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { createTrade } from "@/lib/actions/trade.actions";
 import { blackScholes, daysToYears } from "@/lib/portfolio/options-pricing";
 import { getQuote } from "@/lib/actions/finnhub.actions";
+import DateInput from "./DateInput";
 
 interface AddTradeModalProps {
     userId: string;
@@ -203,10 +204,9 @@ export default function AddTradeModal({ userId, onTradeAdded, watchlistSymbols =
                         </div>
                         <div>
                             <label className="block text-xs text-gray-400 mb-1">Date</label>
-                            <input
-                                type="date"
+                            <DateInput
                                 value={executedAt}
-                                onChange={e => setExecutedAt(e.target.value)}
+                                onChange={setExecutedAt}
                                 className="w-full bg-white/5 border border-white/10 rounded-md px-3 py-2 text-sm text-white outline-none focus:border-white/30"
                             />
                         </div>
@@ -244,7 +244,7 @@ export default function AddTradeModal({ userId, onTradeAdded, watchlistSymbols =
                                 </div>
                                 <div>
                                     <label className="block text-xs text-gray-400 mb-1">Expiration</label>
-                                    <input type="date" value={expDate} onChange={e => setExpDate(e.target.value)}
+                                    <DateInput value={expDate} onChange={setExpDate}
                                         className="w-full bg-white/5 border border-white/10 rounded-md px-3 py-2 text-sm text-white outline-none" />
                                 </div>
                             </div>

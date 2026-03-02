@@ -93,7 +93,7 @@ export async function getPortfolioSummary(userId: string): Promise<PortfolioSumm
             avgCostPerShare: pos.avgCostPerShare,
             adjustedCostBasis: pos.adjustedCostBasis,
             adjustedCostPerShare,
-            realizedPL: pos.realizedPL,
+            realizedPL: pos.realizedPL + pos.optionsPremiumNet,
             unrealizedPL,
             optionsPremiumNet: pos.optionsPremiumNet,
             dividendsReceived: pos.dividendsReceived,
@@ -111,7 +111,7 @@ export async function getPortfolioSummary(userId: string): Promise<PortfolioSumm
 
         totalValue += marketValue;
         totalCostBasis += pos.costBasis;
-        totalRealizedPL += pos.realizedPL;
+        totalRealizedPL += pos.realizedPL + pos.optionsPremiumNet;
         totalUnrealizedPL += unrealizedPL;
         totalOptionsPremium += pos.optionsPremiumNet;
         totalDividends += pos.dividendsReceived;
