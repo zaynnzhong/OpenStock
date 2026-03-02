@@ -219,11 +219,45 @@ export async function getQuote(symbol: string) {
         const token = NEXT_PUBLIC_FINNHUB_API_KEY;
         const url = `${FINNHUB_BASE_URL}/quote?symbol=${encodeURIComponent(symbol)}&token=${token}`;
         // Cache for 15 seconds to avoid rate limit bursts across pages
-        return await fetchJSON<any>(url, 15);
+        const data = await fetchJSON<any>(url, 15);
+        // Finnhub free tier only supports US exchanges — if price is 0, fall back to Yahoo Finance
+        if (data && data.c) return data;
+        return await getQuoteFromYahoo(symbol);
     } catch (e) {
         console.error('Error fetching quote for', symbol, e);
-        return null;
+        // Try Yahoo as last resort
+        try { return await getQuoteFromYahoo(symbol); } catch { return null; }
     }
+}
+
+async function getQuoteFromYahoo(symbol: string) {
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=2d&interval=1d`;
+    const res = await fetch(url, {
+        headers: { "User-Agent": "Mozilla/5.0" },
+        cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const meta = data?.chart?.result?.[0]?.meta;
+    const quotes = data?.chart?.result?.[0]?.indicators?.quote?.[0];
+    if (!meta?.regularMarketPrice) return null;
+
+    const price = meta.regularMarketPrice;
+    const prevClose = meta.chartPreviousClose || meta.previousClose || price;
+    const change = price - prevClose;
+    const changePct = prevClose ? (change / prevClose) * 100 : 0;
+    const highs: number[] = (quotes?.high || []).filter((v: any) => v != null);
+    const lows: number[] = (quotes?.low || []).filter((v: any) => v != null);
+
+    return {
+        c: price,
+        d: change,
+        dp: changePct,
+        h: highs.length ? highs[highs.length - 1] : price,
+        l: lows.length ? lows[lows.length - 1] : price,
+        pc: prevClose,
+        o: meta.regularMarketOpen || price,
+    };
 }
 
 export async function getCompanyProfile(symbol: string) {
@@ -231,11 +265,36 @@ export async function getCompanyProfile(symbol: string) {
         const token = NEXT_PUBLIC_FINNHUB_API_KEY;
         const url = `${FINNHUB_BASE_URL}/stock/profile2?symbol=${encodeURIComponent(symbol)}&token=${token}`;
         // Cache profile for 24 hours
-        return await fetchJSON<any>(url, 86400);
+        const data = await fetchJSON<any>(url, 86400);
+        // Finnhub free tier returns empty object for non-US stocks
+        if (data && data.name) return data;
+        return await getProfileFromYahoo(symbol);
     } catch (e) {
         console.error('Error fetching profile for', symbol, e);
-        return null;
+        try { return await getProfileFromYahoo(symbol); } catch { return null; }
     }
+}
+
+async function getProfileFromYahoo(symbol: string) {
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1d&interval=1d`;
+    const res = await fetch(url, {
+        headers: { "User-Agent": "Mozilla/5.0" },
+        cache: "force-cache",
+        next: { revalidate: 86400 },
+    } as any);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const meta = data?.chart?.result?.[0]?.meta;
+    if (!meta) return null;
+
+    return {
+        name: meta.longName || meta.shortName || symbol,
+        ticker: meta.symbol || symbol,
+        currency: meta.currency || 'USD',
+        exchange: meta.exchangeName || meta.fullExchangeName || '',
+        logo: undefined,
+        marketCapitalization: undefined,
+    };
 }
 
 export async function getWatchlistData(symbols: string[]) {

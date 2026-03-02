@@ -151,6 +151,26 @@ export default function DeepITMLeapFinder() {
         [symbol]
     );
 
+    // Calibrate IV from mid-market price using Newton's method (more accurate than Yahoo's reported IV)
+    const calibrateIV = useCallback(
+        (marketPrice: number, S: number, K: number, T: number, r: number): number => {
+            let iv = 0.3; // initial guess
+            for (let i = 0; i < 50; i++) {
+                const bs = blackScholes({ stockPrice: S, strikePrice: K, timeToExpiry: T, riskFreeRate: r, volatility: iv, optionType: "call" });
+                const diff = bs.price - marketPrice;
+                if (Math.abs(diff) < 0.001) break;
+                // vega is per 1% move, so multiply by 100 to get per-unit vega
+                const vegaUnit = bs.vega * 100;
+                if (vegaUnit < 0.0001) break;
+                iv -= diff / vegaUnit;
+                if (iv <= 0.01) iv = 0.01;
+                if (iv > 5) iv = 5;
+            }
+            return iv;
+        },
+        []
+    );
+
     // Compute LEAP candidates
     const candidates = useMemo((): LeapCandidate[] => {
         if (!chainData || stockPrice <= 0 || daysToExpiry <= 0) return [];
@@ -165,7 +185,12 @@ export default function DeepITMLeapFinder() {
                 const premium = midPrice(contract);
                 if (premium <= 0) return null;
 
-                const iv = contract.impliedVolatility || 0.3;
+                // Calibrate IV from mid-market price for more accurate Greeks
+                // Falls back to Yahoo's reported IV if calibration fails
+                let iv = contract.impliedVolatility || 0.3;
+                const calibrated = calibrateIV(premium, stockPrice, contract.strike, T, r);
+                if (calibrated > 0.01 && calibrated < 5) iv = calibrated;
+
                 const bs = blackScholes({
                     stockPrice,
                     strikePrice: contract.strike,

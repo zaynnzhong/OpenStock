@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { X, ArrowRightLeft, ChevronLeft, ChevronRight, ChevronDown, ChevronRight as ChevronRightIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { getTradesWithPL, deleteTrade, updateTrade, renameSymbol } from "@/lib/actions/trade.actions";
+import { getTradesWithPL, deleteTrade, updateTrade, renameSymbol, getOpenOptionPrices, type OptionPriceData } from "@/lib/actions/trade.actions";
 import StockTradeTable from "./StockTradeTable";
 import OptionTradeTable from "./OptionTradeTable";
 import EditOptionTradeModal from "./EditOptionTradeModal";
@@ -35,6 +35,7 @@ export default function TradeHistory({ userId }: TradeHistoryProps) {
     const [optionLoading, setOptionLoading] = useState(false);
     const [optionOpen, setOptionOpen] = useState(true);
     const [optionStatusFilter, setOptionStatusFilter] = useState<'' | 'Open' | 'Closed'>('');
+    const [optionPrices, setOptionPrices] = useState<Record<string, OptionPriceData>>({});
 
     // Shared state
     const [filterSymbol, setFilterSymbol] = useState("");
@@ -90,8 +91,18 @@ export default function TradeHistory({ userId }: TradeHistoryProps) {
         }
     }, [userId, filterSymbol, optionPage]);
 
+    const fetchOptionPrices = useCallback(async () => {
+        try {
+            const prices = await getOpenOptionPrices(userId, filterSymbol || undefined);
+            setOptionPrices(prices);
+        } catch {
+            // Keep existing data
+        }
+    }, [userId, filterSymbol]);
+
     useEffect(() => { fetchStockTrades(); }, [fetchStockTrades]);
     useEffect(() => { fetchOptionTrades(); }, [fetchOptionTrades]);
+    useEffect(() => { fetchOptionPrices(); }, [fetchOptionPrices]);
 
     const handleDelete = async (tradeId: string) => {
         if (!confirm('Delete this trade? This will recalculate your position.')) return;
@@ -323,6 +334,7 @@ export default function TradeHistory({ userId }: TradeHistoryProps) {
                             trades={optionTrades}
                             loading={optionLoading}
                             statusFilter={optionStatusFilter}
+                            currentPrices={optionPrices}
                             onEdit={openEdit}
                             onDelete={handleDelete}
                         />

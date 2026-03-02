@@ -6,6 +6,7 @@ import { Watchlist } from '@/database/models/watchlist.model';
 import { PortfolioSettings } from '@/database/models/portfolio-settings.model';
 import { computePosition, computePerTradePL, type TradeInput } from '@/lib/portfolio/cost-basis';
 import { parseCSV, type ParseResult } from '@/lib/portfolio/csv-parser';
+import { getOptionsChain } from '@/lib/actions/finnhub.actions';
 import { revalidatePath } from 'next/cache';
 
 function serialize<T>(doc: T): T {
@@ -422,4 +423,84 @@ export async function getTradesWithPL(
     }) as unknown as TradeData[];
 
     return { trades: annotated, total };
+}
+
+export type OptionPriceData = { bid: number; ask: number; mid: number; lastPrice: number };
+
+/**
+ * Fetches current prices for open option contracts.
+ * Returns a map of contractKey → { bid, ask, mid, lastPrice }
+ * where contractKey = "symbol|contractType|strike|expDate"
+ */
+export async function getOpenOptionPrices(
+    userId: string,
+    symbol?: string
+): Promise<Record<string, OptionPriceData>> {
+    await connectToDatabase();
+
+    const query: any = { userId, type: 'OPTION_PREMIUM' };
+    if (symbol) query.symbol = symbol.toUpperCase();
+
+    const trades = await Trade.find(query).sort({ executedAt: 1 }).lean();
+    if (trades.length === 0) return {};
+
+    // Compute net position per contract group (same logic as OptionTradeTable)
+    const groups = new Map<string, number>();
+    for (const t of trades) {
+        const d = t.optionDetails;
+        if (!d) continue;
+        const expDate = d.expirationDate ? new Date(d.expirationDate).toISOString().split('T')[0] : '';
+        const key = `${t.symbol}|${d.contractType}|${d.strikePrice}|${expDate}`;
+        const current = groups.get(key) || 0;
+        const contracts = d.contracts || 1;
+        const isOpen = d.action === 'BUY_TO_OPEN' || d.action === 'SELL_TO_OPEN';
+        groups.set(key, isOpen ? current + contracts : current - contracts);
+    }
+
+    // Collect open positions grouped by symbol → expiration timestamps
+    const symbolExpirations = new Map<string, Set<number>>();
+    for (const [key, net] of groups) {
+        if (net <= 0) continue; // closed
+        const [sym, , , expDate] = key.split('|');
+        if (!expDate) continue;
+        const ts = Math.floor(new Date(expDate).getTime() / 1000);
+        if (!symbolExpirations.has(sym)) symbolExpirations.set(sym, new Set());
+        symbolExpirations.get(sym)!.add(ts);
+    }
+
+    if (symbolExpirations.size === 0) return {};
+
+    // Fetch chains for each symbol+expiration
+    const result: Record<string, OptionPriceData> = {};
+    const fetchPromises: Promise<void>[] = [];
+
+    for (const [sym, expirations] of symbolExpirations) {
+        for (const expTs of expirations) {
+            fetchPromises.push(
+                getOptionsChain(sym, expTs).then(chain => {
+                    if (!chain) return;
+                    // Index calls and puts by strike for fast lookup
+                    for (const contract of [...chain.calls, ...chain.puts]) {
+                        const contractType = chain.calls.includes(contract) ? 'CALL' : 'PUT';
+                        const expDate = new Date(contract.expiration * 1000).toISOString().split('T')[0];
+                        const key = `${sym}|${contractType}|${contract.strike}|${expDate}`;
+                        if (groups.has(key) && (groups.get(key)! > 0)) {
+                            const mid = contract.bid > 0 && contract.ask > 0
+                                ? (contract.bid + contract.ask) / 2
+                                : contract.lastPrice;
+                            result[key] = {
+                                bid: contract.bid,
+                                ask: contract.ask,
+                                mid: Math.round(mid * 100) / 100,
+                                lastPrice: contract.lastPrice,
+                            };
+                        }
+                    }
+                })
+            );
+        }
+    }
+
+    await Promise.all(fetchPromises);
+    return result;
 }

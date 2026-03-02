@@ -761,12 +761,30 @@ export async function POST(req: NextRequest) {
                         oi: number;
                     }
 
+                    // Calibrate IV from mid-market price via Newton's method
+                    const calibIV = (mktPrice: number, S: number, K: number, Texp: number, rate: number): number => {
+                        let iv = 0.3;
+                        for (let i = 0; i < 50; i++) {
+                            const b = blackScholes({ stockPrice: S, strikePrice: K, timeToExpiry: Texp, riskFreeRate: rate, volatility: iv, optionType: "call" });
+                            const diff = b.price - mktPrice;
+                            if (Math.abs(diff) < 0.001) break;
+                            const vegaUnit = b.vega * 100;
+                            if (vegaUnit < 0.0001) break;
+                            iv -= diff / vegaUnit;
+                            if (iv <= 0.01) iv = 0.01;
+                            if (iv > 5) iv = 5;
+                        }
+                        return iv;
+                    };
+
                     const candidates: LeapRow[] = leapChain.calls
                         .filter((c) => c.strike < price)
                         .map((contract) => {
                             const premium = midPriceCalc(contract);
                             if (premium <= 0) return null;
-                            const iv = contract.impliedVolatility || 0.3;
+                            let iv = contract.impliedVolatility || 0.3;
+                            const calIv = calibIV(premium, price, contract.strike, T, r);
+                            if (calIv > 0.01 && calIv < 5) iv = calIv;
                             const bs = blackScholes({
                                 stockPrice: price,
                                 strikePrice: contract.strike,
