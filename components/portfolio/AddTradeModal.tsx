@@ -8,16 +8,38 @@ import { blackScholes, daysToYears } from "@/lib/portfolio/options-pricing";
 import { getQuote } from "@/lib/actions/finnhub.actions";
 import DateInput from "./DateInput";
 
+interface QueuedTrade {
+    key: number;
+    symbol: string;
+    type: TradeType;
+    quantity: string;
+    pricePerShare: string;
+    fees: string;
+    executedAt: string;
+    notes: string;
+    showOptions: boolean;
+    contractType: "CALL" | "PUT";
+    optionAction: OptionAction;
+    strikePrice: string;
+    expDate: string;
+    contracts: string;
+    premiumPerContract: string;
+}
+
 interface AddTradeModalProps {
     userId: string;
     onTradeAdded?: () => void;
     watchlistSymbols?: string[];
 }
 
+let nextKey = 0;
+
 export default function AddTradeModal({ userId, onTradeAdded, watchlistSymbols = [] }: AddTradeModalProps) {
     const [open, setOpen] = useState(false);
     const [saving, setSaving] = useState(false);
+    const [savingProgress, setSavingProgress] = useState("");
     const [error, setError] = useState<string | null>(null);
+    const [queue, setQueue] = useState<QueuedTrade[]>([]);
 
     const [symbol, setSymbol] = useState("");
     const [type, setType] = useState<TradeType>("BUY");
@@ -52,50 +74,118 @@ export default function AddTradeModal({ userId, onTradeAdded, watchlistSymbols =
         setContracts("");
         setPremiumPerContract("");
         setError(null);
+        setQueue([]);
+    };
+
+    const resetFormForNext = () => {
+        // Keep symbol, type, executedAt, and option contract fields sticky
+        setQuantity("");
+        setPricePerShare("");
+        setFees("");
+        setNotes("");
+        setContracts("");
+        setPremiumPerContract("");
+        setError(null);
+    };
+
+    const validateForm = (): boolean => {
+        setError(null);
+        if (!symbol.trim()) { setError("Symbol is required"); return false; }
+        if (!executedAt) { setError("Date is required"); return false; }
+
+        const qty = parseFloat(quantity) || 0;
+        const price = parseFloat(pricePerShare) || 0;
+
+        if (type !== 'DIVIDEND' && type !== 'OPTION_PREMIUM' && (qty <= 0 || price <= 0)) {
+            setError("Quantity and price must be greater than 0");
+            return false;
+        }
+        return true;
+    };
+
+    const buildTradePayload = (trade: QueuedTrade) => {
+        const qty = parseFloat(trade.quantity) || 0;
+        const price = parseFloat(trade.pricePerShare) || 0;
+        const fee = parseFloat(trade.fees) || 0;
+        const totalAmount = trade.type === 'OPTION_PREMIUM' && trade.showOptions
+            ? (parseFloat(trade.contracts) || 0) * (parseFloat(trade.premiumPerContract) || 0) * 100
+            : qty * price;
+
+        return {
+            userId,
+            symbol: trade.symbol.toUpperCase(),
+            type: trade.type,
+            quantity: qty,
+            pricePerShare: price,
+            totalAmount,
+            fees: fee,
+            executedAt: trade.executedAt,
+            notes: trade.notes || undefined,
+            optionDetails: trade.type === 'OPTION_PREMIUM' && trade.showOptions ? {
+                contractType: trade.contractType,
+                action: trade.optionAction,
+                strikePrice: parseFloat(trade.strikePrice) || 0,
+                expirationDate: trade.expDate,
+                contracts: parseFloat(trade.contracts) || 0,
+                premiumPerContract: parseFloat(trade.premiumPerContract) || 0,
+            } : undefined,
+        };
+    };
+
+    const currentFormSnapshot = (): QueuedTrade => ({
+        key: nextKey++,
+        symbol, type, quantity, pricePerShare, fees, executedAt, notes,
+        showOptions, contractType, optionAction, strikePrice, expDate, contracts, premiumPerContract,
+    });
+
+    const handleAddToQueue = () => {
+        if (!validateForm()) return;
+        setQueue(prev => [...prev, currentFormSnapshot()]);
+        resetFormForNext();
+    };
+
+    const handleRemoveFromQueue = (key: number) => {
+        setQueue(prev => prev.filter(t => t.key !== key));
+    };
+
+    const formatQueuedTrade = (t: QueuedTrade): string => {
+        if (t.type === 'OPTION_PREMIUM' && t.showOptions) {
+            const actionLabel = t.optionAction.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+                .replace('Sell To Open', 'STO').replace('Sell To Close', 'STC')
+                .replace('Buy To Open', 'BTO').replace('Buy To Close', 'BTC');
+            const exp = t.expDate ? new Date(t.expDate + 'T00:00:00').toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' }) : '';
+            return `${t.symbol} ${actionLabel} ${t.contracts}x ${t.contractType} $${t.strikePrice} ${exp} @ $${t.premiumPerContract}`;
+        }
+        return `${t.symbol} ${t.type} ${t.quantity} @ $${t.pricePerShare}`;
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setError(null);
 
-        if (!symbol.trim()) { setError("Symbol is required"); return; }
-        if (!executedAt) { setError("Date is required"); return; }
+        // Collect all trades to submit: queued + current form (if filled)
+        const trades: QueuedTrade[] = [...queue];
+        const hasCurrentForm = symbol.trim() && (
+            (type !== 'DIVIDEND' && type !== 'OPTION_PREMIUM' && parseFloat(quantity) > 0 && parseFloat(pricePerShare) > 0) ||
+            type === 'DIVIDEND' || type === 'OPTION_PREMIUM'
+        );
 
-        const qty = parseFloat(quantity) || 0;
-        const price = parseFloat(pricePerShare) || 0;
-        const fee = parseFloat(fees) || 0;
+        if (hasCurrentForm) {
+            if (!validateForm()) return;
+            trades.push(currentFormSnapshot());
+        }
 
-        if (type !== 'DIVIDEND' && type !== 'OPTION_PREMIUM' && (qty <= 0 || price <= 0)) {
-            setError("Quantity and price must be greater than 0");
+        if (trades.length === 0) {
+            setError("No trades to submit");
             return;
         }
 
-        const totalAmount = type === 'OPTION_PREMIUM' && showOptions
-            ? (parseFloat(contracts) || 0) * (parseFloat(premiumPerContract) || 0) * 100
-            : qty * price;
-
         setSaving(true);
         try {
-            await createTrade({
-                userId,
-                symbol: symbol.toUpperCase(),
-                type,
-                quantity: qty,
-                pricePerShare: price,
-                totalAmount,
-                fees: fee,
-                executedAt,
-                notes: notes || undefined,
-                optionDetails: type === 'OPTION_PREMIUM' && showOptions ? {
-                    contractType,
-                    action: optionAction,
-                    strikePrice: parseFloat(strikePrice) || 0,
-                    expirationDate: expDate,
-                    contracts: parseFloat(contracts) || 0,
-                    premiumPerContract: parseFloat(premiumPerContract) || 0,
-                } : undefined,
-            });
-
+            for (let i = 0; i < trades.length; i++) {
+                if (trades.length > 1) setSavingProgress(`Saving ${i + 1}/${trades.length}...`);
+                await createTrade(buildTradePayload(trades[i]));
+            }
             resetForm();
             setOpen(false);
             onTradeAdded?.();
@@ -103,6 +193,7 @@ export default function AddTradeModal({ userId, onTradeAdded, watchlistSymbols =
             setError(err.message || "Failed to create trade");
         } finally {
             setSaving(false);
+            setSavingProgress("");
         }
     };
 
@@ -118,11 +209,27 @@ export default function AddTradeModal({ userId, onTradeAdded, watchlistSymbols =
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
             <div className="w-full max-w-lg bg-gray-900 border border-white/10 rounded-xl shadow-2xl p-6 max-h-[90vh] overflow-y-auto">
                 <div className="flex items-center justify-between mb-6">
-                    <h2 className="text-lg font-semibold text-white">Add Trade</h2>
+                    <h2 className="text-lg font-semibold text-white">
+                        Add Trade{queue.length > 0 && <span className="text-sm font-normal text-gray-400 ml-2">({queue.length} queued)</span>}
+                    </h2>
                     <button onClick={() => { resetForm(); setOpen(false); }} className="text-gray-400 hover:text-white">
                         <X className="w-5 h-5" />
                     </button>
                 </div>
+
+                {/* Queued trades list */}
+                {queue.length > 0 && (
+                    <div className="mb-4 space-y-1.5">
+                        {queue.map(t => (
+                            <div key={t.key} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-xs text-gray-300">
+                                <span className="flex-1 truncate font-mono">{formatQueuedTrade(t)}</span>
+                                <button type="button" onClick={() => handleRemoveFromQueue(t.key)} className="text-gray-500 hover:text-red-400 shrink-0">
+                                    <X className="w-3.5 h-3.5" />
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                )}
 
                 <form onSubmit={handleSubmit} className="space-y-4">
                     {/* Symbol with autocomplete from watchlist */}
@@ -287,12 +394,17 @@ export default function AddTradeModal({ userId, onTradeAdded, watchlistSymbols =
                         <p className="text-red-400 text-xs">{error}</p>
                     )}
 
-                    <div className="flex justify-end gap-3 pt-2">
-                        <Button type="button" variant="ghost" onClick={() => { resetForm(); setOpen(false); }}>
-                            Cancel
-                        </Button>
+                    <div className="flex justify-between pt-2">
+                        <div className="flex gap-2">
+                            <Button type="button" variant="ghost" onClick={() => { resetForm(); setOpen(false); }}>
+                                Cancel
+                            </Button>
+                            <Button type="button" variant="outline" onClick={handleAddToQueue} disabled={saving}>
+                                Add & Next
+                            </Button>
+                        </div>
                         <Button type="submit" disabled={saving}>
-                            {saving ? 'Saving...' : 'Add Trade'}
+                            {saving ? (savingProgress || 'Saving...') : queue.length > 0 ? `Submit All (${queue.length + 1})` : 'Add Trade'}
                         </Button>
                     </div>
                 </form>
