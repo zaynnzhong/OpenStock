@@ -1,15 +1,29 @@
-import { Calculator, Layers, Target, Telescope } from "lucide-react";
+import { Calculator, Layers, Target, Telescope, TrendingUp } from "lucide-react";
+import { auth } from "@/lib/better-auth/auth";
+import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 import OptionsCalculator from "@/components/tools/OptionsCalculator";
 import StrategyBuilder from "@/components/tools/StrategyBuilder";
 import TargetPriceAnalyzer from "@/components/tools/TargetPriceAnalyzer";
 import DeepITMLeapFinder from "@/components/tools/DeepITMLeapFinder";
+import PortfolioTrendDashboard from "@/components/tools/PortfolioTrendDashboard";
 
 export const metadata = {
     title: "Tools | OpenStock",
     description: "Options pricing calculator and other trading tools.",
 };
 
-export default function ToolsPage() {
+export default async function ToolsPage() {
+    const session = await auth.api.getSession({
+        headers: await headers(),
+    });
+
+    if (!session) {
+        redirect('/sign-in');
+    }
+
+    const userId = session.user.id;
+
     return (
         <div className="max-w-5xl mx-auto space-y-10 pb-20">
             <section className="pt-10 space-y-2">
@@ -70,6 +84,20 @@ export default function ToolsPage() {
 
                 <div className="bg-gray-900 border border-white/10 rounded-xl p-6">
                     <DeepITMLeapFinder />
+                </div>
+            </section>
+
+            <section className="space-y-6">
+                <div className="flex items-center gap-3">
+                    <TrendingUp className="text-teal-400 h-6 w-6" />
+                    <h2 className="text-xl font-semibold text-white">Portfolio Trend Dashboard</h2>
+                </div>
+                <p className="text-sm text-gray-400">
+                    Auto-monitors all your holdings — technical trends (SMA20/50), sparklines, and social buzz from Reddit, Hacker News, and financial news.
+                </p>
+
+                <div className="bg-gray-900 border border-white/10 rounded-xl p-6">
+                    <PortfolioTrendDashboard userId={userId} />
                 </div>
             </section>
         </div>

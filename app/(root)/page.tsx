@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import TradingViewWidget from "@/components/TradingViewWidget";
 import PortfolioHeatmapWrapper from "@/components/heatmap/PortfolioHeatmapWrapper";
 import WatchlistTrackerWrapper from "@/components/watchlist/WatchlistTrackerWrapper";
+import PortfolioTrendDashboardWrapper from "@/components/tools/PortfolioTrendDashboardWrapper";
 import {
     HEATMAP_WIDGET_CONFIG,
     MARKET_DATA_WIDGET_CONFIG,
@@ -63,6 +64,20 @@ const Home = async () => {
                     }
                 >
                     <WatchlistTrackerWrapper />
+                </Suspense>
+            </section>
+            <section className="w-full mt-8">
+                <Suspense
+                    fallback={
+                        <div>
+                            <h3 className="font-semibold text-2xl text-gray-100 mb-5">
+                                Portfolio Trends
+                            </h3>
+                            <div className="w-full h-[300px] rounded-xl bg-gray-800 animate-pulse" />
+                        </div>
+                    }
+                >
+                    <PortfolioTrendDashboardWrapper />
                 </Suspense>
             </section>
             <section className="grid w-full gap-8 home-section">
