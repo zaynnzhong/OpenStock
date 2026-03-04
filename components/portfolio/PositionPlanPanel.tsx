@@ -31,6 +31,7 @@ import {
     updateTierMaxSlots,
     fetchSymbolSector,
     autoTagAllSlots,
+    initializeAllSlotDefaults,
 } from "@/lib/actions/position-plan.actions";
 import PlanOverviewBar from "./plan/PlanOverviewBar";
 import CashPanel from "./plan/CashPanel";
@@ -251,7 +252,10 @@ export default function PositionPlanPanel({
     };
 
     const [autoTagging, setAutoTagging] = useState(false);
+    const [initializing, setInitializing] = useState(false);
     const hasUntagged = enrichedSlots.some((s) => !s.sector);
+    const hasMissingStopLoss = enrichedSlots.some((s) => !s.stopLossPrice && s.hasPosition);
+    const needsInit = hasUntagged || hasMissingStopLoss;
 
     const handleAutoTagAll = async () => {
         setAutoTagging(true);
@@ -259,6 +263,15 @@ export default function PositionPlanPanel({
             updatePlan(await autoTagAllSlots(userId));
         } finally {
             setAutoTagging(false);
+        }
+    };
+
+    const handleInitializeAll = async () => {
+        setInitializing(true);
+        try {
+            updatePlan(await initializeAllSlotDefaults(userId, positions));
+        } finally {
+            setInitializing(false);
         }
     };
 
@@ -300,16 +313,16 @@ export default function PositionPlanPanel({
                     <Building2 className="h-3.5 w-3.5" />
                     By Sector
                 </Button>
-                {hasUntagged && (
+                {needsInit && (
                     <Button
                         variant="ghost"
                         size="sm"
-                        onClick={handleAutoTagAll}
-                        disabled={autoTagging}
+                        onClick={handleInitializeAll}
+                        disabled={initializing}
                         className="gap-1.5 ml-auto text-gray-400 hover:text-gray-200"
                     >
                         <Tag className="h-3.5 w-3.5" />
-                        {autoTagging ? "Classifying..." : "Auto-classify sectors"}
+                        {initializing ? "Initializing..." : "Auto-setup all slots"}
                     </Button>
                 )}
             </div>

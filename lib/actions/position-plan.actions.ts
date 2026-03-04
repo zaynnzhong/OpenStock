@@ -215,6 +215,92 @@ export async function autoTagAllSlots(userId: string) {
     return serialize(plan.toObject());
 }
 
+/**
+ * Comprehensive initialization: auto-classify sectors, set default stop losses,
+ * and populate cost basis from position data.
+ * Stop loss defaults: Core -8%, Satellite -12%, Speculative -18% from current price.
+ */
+export async function initializeAllSlotDefaults(
+    userId: string,
+    positions: PositionWithPriceData[]
+) {
+    await connectToDatabase();
+    const plan = await PositionPlan.findOne({ userId });
+    if (!plan || !plan.slots.length) return serialize(plan);
+
+    const STOP_LOSS_PCT: Record<string, number> = {
+        core: 8,
+        satellite: 12,
+        speculative: 18,
+    };
+
+    let changed = false;
+    for (const slot of plan.slots) {
+        const pos = positions.find(p => p.symbol === slot.symbol);
+
+        // 1. Auto-fetch sector/industry
+        try {
+            const result = await getYahooSectorIndustry(slot.symbol);
+            if (result) {
+                if (!slot.sector && result.sector) {
+                    slot.sector = result.sector;
+                    changed = true;
+                }
+                if (!slot.industry && result.industry) {
+                    slot.industry = result.industry;
+                    changed = true;
+                }
+                if (!slot.topics || slot.topics.length === 0) {
+                    const tags: string[] = [];
+                    if (result.sector) tags.push(result.sector);
+                    if (result.industry && result.industry !== result.sector) tags.push(result.industry);
+                    if (tags.length > 0) {
+                        slot.topics = tags;
+                        changed = true;
+                    }
+                }
+            }
+        } catch { /* skip */ }
+
+        // 2. Set default stop loss if not already set and position exists
+        if (!slot.stopLossPrice && pos && pos.currentPrice > 0) {
+            const pct = STOP_LOSS_PCT[slot.tier] || 12;
+            slot.stopLossPrice = Math.round(pos.currentPrice * (1 - pct / 100) * 100) / 100;
+            slot.maxDrawdownPct = slot.maxDrawdownPct || plan.maxDrawdownPctDefault || 2;
+            changed = true;
+        }
+
+        // 3. Populate cost basis and avg entry price from position data
+        if (pos) {
+            if (!slot.costBasis && pos.costBasis > 0) {
+                slot.costBasis = pos.costBasis;
+                changed = true;
+            }
+            if (!slot.avgEntryPrice && pos.avgCostPerShare > 0) {
+                slot.avgEntryPrice = pos.avgCostPerShare;
+                changed = true;
+            }
+        }
+    }
+
+    if (changed) {
+        await plan.save();
+
+        // Sync alerts for all slots that now have stop losses or targets
+        for (const slot of plan.slots) {
+            if (slot.stopLossPrice || (slot.stagedTargets && slot.stagedTargets.length > 0)) {
+                try {
+                    await syncPositionPlanAlerts(userId, slot.symbol);
+                } catch { /* skip */ }
+            }
+        }
+
+        revalidatePath('/portfolio');
+    }
+
+    return serialize(plan.toObject());
+}
+
 export async function removePositionPlanSlot(userId: string, symbol: string) {
     await connectToDatabase();
     const upperSymbol = symbol.toUpperCase();

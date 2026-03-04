@@ -350,6 +350,77 @@ export async function getCompanyProfile(symbol: string) {
     }
 }
 
+// Map Finnhub industry names to standard sector categories
+const FINNHUB_INDUSTRY_TO_SECTOR: Record<string, string> = {
+    'Technology': 'Technology',
+    'Media': 'Communication Services',
+    'Automobiles': 'Consumer Cyclical',
+    'Banks': 'Financial',
+    'Insurance': 'Financial',
+    'Financial Services': 'Financial',
+    'REITs': 'Real Estate',
+    'Real Estate': 'Real Estate',
+    'Biotechnology': 'Healthcare',
+    'Pharmaceuticals': 'Healthcare',
+    'Healthcare': 'Healthcare',
+    'Oil & Gas': 'Energy',
+    'Energy': 'Energy',
+    'Utilities': 'Utilities',
+    'Metals & Mining': 'Basic Materials',
+    'Chemicals': 'Basic Materials',
+    'Basic Materials': 'Basic Materials',
+    'Aerospace & Defense': 'Industrials',
+    'Industrial Conglomerates': 'Industrials',
+    'Machinery': 'Industrials',
+    'Airlines': 'Industrials',
+    'Construction': 'Industrials',
+    'Semiconductors': 'Technology',
+    'Software': 'Technology',
+    'Hardware': 'Technology',
+    'Retail': 'Consumer Cyclical',
+    'Consumer Goods': 'Consumer Defensive',
+    'Food & Beverage': 'Consumer Defensive',
+    'Household Products': 'Consumer Defensive',
+    'Telecommunications': 'Communication Services',
+    'Entertainment': 'Communication Services',
+};
+
+export async function getYahooSectorIndustry(symbol: string): Promise<{ sector: string; industry: string } | null> {
+    // Try Finnhub first (more reliable)
+    try {
+        const token = NEXT_PUBLIC_FINNHUB_API_KEY;
+        const url = `${FINNHUB_BASE_URL}/stock/profile2?symbol=${encodeURIComponent(symbol)}&token=${token}`;
+        const data = await fetchJSON<any>(url, 86400);
+        if (data?.finnhubIndustry) {
+            const industry = data.finnhubIndustry;
+            const sector = FINNHUB_INDUSTRY_TO_SECTOR[industry] || industry;
+            return { sector, industry };
+        }
+    } catch { /* fall through to Yahoo */ }
+
+    // Fallback to Yahoo quoteSummary
+    try {
+        const { crumb, cookie } = await getYahooCrumb();
+        const url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=assetProfile&crumb=${encodeURIComponent(crumb)}`;
+        const res = await fetch(url, {
+            headers: { "User-Agent": "Mozilla/5.0", Cookie: cookie },
+            cache: "force-cache",
+            next: { revalidate: 86400 },
+        } as any);
+        if (!res.ok) return null;
+        const data = await res.json();
+        const profile = data?.quoteSummary?.result?.[0]?.assetProfile;
+        if (!profile) return null;
+        return {
+            sector: profile.sector || '',
+            industry: profile.industry || '',
+        };
+    } catch (e) {
+        console.error('Error fetching Yahoo sector for', symbol, e);
+        return null;
+    }
+}
+
 async function getProfileFromYahoo(symbol: string) {
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1d&interval=1d`;
     const res = await fetch(url, {
