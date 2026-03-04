@@ -563,7 +563,16 @@ export async function runRulesAudit(
         trades,
     };
 
-    return auditPositionPlan(input);
+    const result = auditPositionPlan(input);
+
+    // Persist audit result so it survives page reloads
+    await PositionPlan.findOneAndUpdate(
+        { userId },
+        { $set: { lastAuditResult: result } }
+    );
+
+    revalidatePath('/portfolio');
+    return result;
 }
 
 // ---------- Sector Heat Data ----------

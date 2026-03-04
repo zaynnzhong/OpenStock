@@ -372,6 +372,7 @@ declare global {
         cashBalance: number;
         cashTransactions: CashTransaction[];
         maxDrawdownPctDefault: number;
+        lastAuditResult?: RulesAuditResult;
     };
 
     type EnrichedPlanSlot = PositionPlanSlot & {

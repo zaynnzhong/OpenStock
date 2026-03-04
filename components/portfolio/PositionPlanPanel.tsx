@@ -169,8 +169,7 @@ export default function PositionPlanPanel({
         return groups;
     }, [enrichedSlots]);
 
-    // Health score placeholder (computed when audit runs)
-    const [healthScore, setHealthScore] = useState(100);
+    const [healthScore, setHealthScore] = useState(plan?.lastAuditResult?.totalScore ?? 100);
 
     const updatePlan = (result: unknown) => {
         if (result) setPlan(result as PositionPlanData);
@@ -475,7 +474,7 @@ export default function PositionPlanPanel({
             />
 
             {/* Rules Audit */}
-            <RulesAuditPanel userId={userId} positions={positions} trades={trades} />
+            <RulesAuditPanel userId={userId} positions={positions} trades={trades} lastAuditResult={plan?.lastAuditResult} onScoreChange={setHealthScore} />
 
             {/* Sector Rotation */}
             <SectorRotationPanel slots={plan?.slots || []} positions={positions} />

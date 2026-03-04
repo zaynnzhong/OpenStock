@@ -59,6 +59,12 @@ export interface PositionPlanDocument extends Document {
     cashBalance: number;
     cashTransactions: CashTransaction[];
     maxDrawdownPctDefault: number;
+    lastAuditResult?: {
+        violations: any[];
+        structureValid: boolean;
+        totalScore: number;
+        timestamp: Date;
+    };
     createdAt: Date;
     updatedAt: Date;
 }
@@ -136,6 +142,15 @@ const PositionPlanSchema = new Schema<PositionPlanDocument>(
         cashBalance: { type: Number, default: 0 },
         cashTransactions: { type: [CashTransactionSchema], default: [] },
         maxDrawdownPctDefault: { type: Number, default: 2 },
+        lastAuditResult: {
+            type: {
+                violations: { type: [Schema.Types.Mixed], default: [] },
+                structureValid: { type: Boolean },
+                totalScore: { type: Number },
+                timestamp: { type: Date },
+            },
+            default: undefined,
+        },
     },
     { timestamps: true }
 );

@@ -10,6 +10,8 @@ interface RulesAuditPanelProps {
     userId: string;
     positions: PositionWithPriceData[];
     trades: TradeData[];
+    lastAuditResult?: RulesAuditResult;
+    onScoreChange?: (score: number) => void;
 }
 
 const SEVERITY_CONFIG = {
@@ -25,10 +27,10 @@ function getHealthColor(score: number) {
     return "text-red-400";
 }
 
-export default function RulesAuditPanel({ userId, positions, trades }: RulesAuditPanelProps) {
-    const [result, setResult] = useState<RulesAuditResult | null>(null);
+export default function RulesAuditPanel({ userId, positions, trades, lastAuditResult, onScoreChange }: RulesAuditPanelProps) {
+    const [result, setResult] = useState<RulesAuditResult | null>(lastAuditResult ?? null);
     const [loading, setLoading] = useState(false);
-    const [expanded, setExpanded] = useState(true);
+    const [expanded, setExpanded] = useState(!!lastAuditResult);
 
     const handleRunAudit = async () => {
         setLoading(true);
@@ -36,6 +38,7 @@ export default function RulesAuditPanel({ userId, positions, trades }: RulesAudi
             const auditResult = await runRulesAudit(userId, positions, trades);
             setResult(auditResult);
             setExpanded(true);
+            onScoreChange?.(auditResult.totalScore);
         } finally {
             setLoading(false);
         }
