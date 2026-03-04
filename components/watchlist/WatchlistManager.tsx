@@ -12,10 +12,9 @@ interface WatchlistManagerProps {
     initialItems: WatchlistItem[];
     userId: string;
     tableData?: any[];
-    tradeSymbols?: string[];
 }
 
-export default function WatchlistManager({ initialItems, userId, tableData, tradeSymbols = [] }: WatchlistManagerProps) {
+export default function WatchlistManager({ initialItems, userId, tableData }: WatchlistManagerProps) {
     // Sort state: 'asc' (A-Z), 'desc' (Z-A), or null (added order/default)
     const [sortOrder, setSortOrder] = useState<'asc' | 'desc' | null>(null);
 
@@ -103,7 +102,7 @@ export default function WatchlistManager({ initialItems, userId, tableData, trad
             </div>
 
             {sortedTableData && sortedTableData.length > 0 && (
-                <WatchlistTable data={sortedTableData} userId={userId} tradeSymbols={tradeSymbols} />
+                <WatchlistTable data={sortedTableData} userId={userId} />
             )}
 
             <div className="min-h-[550px]">

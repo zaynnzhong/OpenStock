@@ -3,9 +3,8 @@ import { auth } from '@/lib/better-auth/auth';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { getUserWatchlist } from '@/lib/actions/watchlist.actions';
-import { getUserAlerts, syncAllHoldingAlerts } from '@/lib/actions/alert.actions';
+import { getUserAlerts } from '@/lib/actions/alert.actions';
 import { getNews, getWatchlistData } from '@/lib/actions/finnhub.actions';
-import { getTradeSymbols } from '@/lib/actions/trade.actions';
 import WatchlistManager from '@/components/watchlist/WatchlistManager';
 import AlertsPanel from '@/components/watchlist/AlertsPanel';
 import NewsGrid from '@/components/watchlist/NewsGrid';
@@ -24,11 +23,10 @@ export default async function WatchlistPage() {
     const userId = session.user.id;
 
     // Parallel data fetching
-    const [watchlistItems, alerts, news, tradeSymbols] = await Promise.all([
+    const [watchlistItems, alerts, news] = await Promise.all([
         getUserWatchlist(userId),
         getUserAlerts(userId),
         getNews(), // Initial news fetch
-        getTradeSymbols(userId),
     ]);
 
     const watchlistSymbols = watchlistItems.map((item: any) => item.symbol);
@@ -43,7 +41,7 @@ export default async function WatchlistPage() {
         }
     }
 
-    // Merge watchlist holdings with market data
+    // Merge watchlist data with market data
     const tableData = watchlistItems.map((item: any) => {
         const market = stockData.find((s: any) => s.symbol === item.symbol);
         return {
@@ -54,21 +52,11 @@ export default async function WatchlistPage() {
             change: market?.change || 0,
             changePercent: market?.changePercent || 0,
             marketCap: market?.marketCap || 0,
-            shares: item.shares || 0,
-            avgCost: item.avgCost || 0,
             watchSince: item.watchSince || null,
             addedAt: item.addedAt || null,
+            notes: item.notes || '',
         };
     });
-
-    // Backfill holding alerts for existing holdings that don't have alerts yet
-    const holdingsWithCost = tableData.filter((s: any) => s.avgCost > 0 && s.price > 0);
-    let finalAlerts = alerts;
-    if (holdingsWithCost.length > 0) {
-        await syncAllHoldingAlerts(userId, holdingsWithCost);
-        // Re-fetch alerts so the initial render includes newly created ones
-        finalAlerts = await getUserAlerts(userId);
-    }
 
     // Fallback news if watchlist has items
     const relevantNews = watchlistSymbols.length > 0 ? await getNews(watchlistSymbols) : news;
@@ -92,7 +80,7 @@ export default async function WatchlistPage() {
                 {/* Main Content */}
                 <div className="lg:col-span-3 space-y-8">
                     <div className="space-y-6">
-                        <WatchlistManager initialItems={watchlistItems} userId={userId} tableData={tableData} tradeSymbols={tradeSymbols} />
+                        <WatchlistManager initialItems={watchlistItems} userId={userId} tableData={tableData} />
                     </div>
 
                     {/* News Section */}
@@ -103,7 +91,7 @@ export default async function WatchlistPage() {
 
                 {/* Sidebar - Alerts */}
                 <div className="lg:col-span-1">
-                    <AlertsPanel alerts={finalAlerts} userId={userId} />
+                    <AlertsPanel alerts={alerts} userId={userId} />
                 </div>
             </div>
         </div>

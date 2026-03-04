@@ -2,34 +2,28 @@
 
 import React, { useEffect, useState, useRef } from "react";
 import Image from "next/image";
-import Link from "next/link";
-import { ArrowUp, ArrowDown, Bell, Check, X, ExternalLink } from "lucide-react";
+import { ArrowUp, ArrowDown, Bell } from "lucide-react";
 import CreateAlertModal from "./CreateAlertModal";
 import WatchlistButton from "@/components/WatchlistButton";
 import { formatCurrency, formatNumber } from "@/lib/utils";
-import { removeFromWatchlist, updateWatchSince } from "@/lib/actions/watchlist.actions";
+import { removeFromWatchlist, updateWatchSince, updateNotes } from "@/lib/actions/watchlist.actions";
 
 interface WatchlistTableProps {
     data: any[];
     userId: string;
     onRefresh?: () => void;
-    tradeSymbols?: string[];
 }
 
-function EditableCell({
+function EditableNotesCell({
     value,
     symbol,
-    field,
     userId,
     onSaved,
-    format,
 }: {
-    value: number;
+    value: string;
     symbol: string;
-    field: "shares" | "avgCost";
     userId: string;
-    onSaved: (symbol: string, field: "shares" | "avgCost", newVal: number) => void;
-    format?: (v: number) => string;
+    onSaved: (symbol: string, notes: string) => void;
 }) {
     const [editing, setEditing] = useState(false);
     const [draft, setDraft] = useState("");
@@ -37,32 +31,23 @@ function EditableCell({
     const inputRef = useRef<HTMLInputElement>(null);
 
     const startEdit = () => {
-        setDraft(value > 0 ? String(value) : "");
+        setDraft(value || "");
         setEditing(true);
         setTimeout(() => inputRef.current?.focus(), 0);
     };
 
     const save = async () => {
-        const num = parseFloat(draft) || 0;
-        if (num === value) {
+        const trimmed = draft.trim();
+        if (trimmed === (value || "")) {
             setEditing(false);
             return;
         }
         setSaving(true);
         try {
-            const body: any = { userId, symbol };
-            body[field] = num;
-            // We need to send both fields; fetch current other field from parent
-            const res = await fetch("/api/holdings", {
-                method: "PUT",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(body),
-            });
-            if (res.ok) {
-                onSaved(symbol, field, num);
-            }
+            await updateNotes(userId, symbol, trimmed);
+            onSaved(symbol, trimmed);
         } catch (err) {
-            console.error("Failed to save:", err);
+            console.error("Failed to save notes:", err);
         } finally {
             setSaving(false);
             setEditing(false);
@@ -80,40 +65,37 @@ function EditableCell({
 
     if (editing) {
         return (
-            <div className="flex items-center gap-1">
-                <input
-                    ref={inputRef}
-                    type="number"
-                    min="0"
-                    step="any"
-                    value={draft}
-                    onChange={(e) => setDraft(e.target.value)}
-                    onKeyDown={handleKeyDown}
-                    onBlur={save}
-                    disabled={saving}
-                    className="w-20 bg-white/10 border border-white/20 rounded px-2 py-1 text-sm text-white outline-none focus:border-blue-500"
-                />
-            </div>
+            <input
+                ref={inputRef}
+                type="text"
+                maxLength={120}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={handleKeyDown}
+                onBlur={save}
+                disabled={saving}
+                className="w-full bg-white/10 border border-white/20 rounded px-2 py-1 text-sm text-white outline-none focus:border-blue-500"
+                placeholder="Add a note..."
+            />
         );
     }
 
     return (
         <button
             onClick={startEdit}
-            className="text-left hover:bg-white/10 rounded px-2 py-1 -mx-2 -my-1 transition-colors cursor-text group/cell"
+            className="text-left hover:bg-white/10 rounded px-2 py-1 -mx-2 -my-1 transition-colors cursor-text group/cell w-full"
             title="Click to edit"
         >
-            {value > 0 ? (
-                <span>{format ? format(value) : value}</span>
+            {value ? (
+                <span className="text-gray-300 text-sm">{value}</span>
             ) : (
-                <span className="text-gray-600 group-hover/cell:text-gray-400">—</span>
+                <span className="text-gray-600 group-hover/cell:text-gray-400 text-sm">Add note...</span>
             )}
         </button>
     );
 }
 
-export default function WatchlistTable({ data, userId, onRefresh, tradeSymbols = [] }: WatchlistTableProps) {
-    const tradeSymbolSet = new Set(tradeSymbols.map(s => s.toUpperCase()));
+export default function WatchlistTable({ data, userId, onRefresh }: WatchlistTableProps) {
     const [stocks, setStocks] = useState(data);
 
     useEffect(() => {
@@ -165,10 +147,10 @@ export default function WatchlistTable({ data, userId, onRefresh, tradeSymbols =
         return () => clearInterval(interval);
     }, [stocks]);
 
-    const handleCellSaved = (symbol: string, field: "shares" | "avgCost", newVal: number) => {
+    const handleNotesSaved = (symbol: string, notes: string) => {
         setStocks(current =>
             current.map(s =>
-                s.symbol === symbol ? { ...s, [field]: newVal } : s
+                s.symbol === symbol ? { ...s, notes } : s
             )
         );
     };
@@ -191,21 +173,15 @@ export default function WatchlistTable({ data, userId, onRefresh, tradeSymbols =
                         <th className="px-6 py-4 font-semibold tracking-wide">Symbol</th>
                         <th className="px-6 py-4 font-semibold tracking-wide">Price</th>
                         <th className="px-6 py-4 font-semibold tracking-wide">Change</th>
-                        <th className="px-6 py-4 font-semibold tracking-wide">Shares</th>
-                        <th className="px-6 py-4 font-semibold tracking-wide">Avg Cost</th>
-                        <th className="px-6 py-4 font-semibold tracking-wide">P/L</th>
                         <th className="px-6 py-4 font-semibold tracking-wide">Market Cap</th>
                         <th className="px-6 py-4 font-semibold tracking-wide">Watch Since</th>
+                        <th className="px-6 py-4 font-semibold tracking-wide">Notes</th>
                         <th className="px-6 py-4 text-right font-semibold tracking-wide">Actions</th>
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-white/10">
                     {stocks.map((stock: any) => {
                         const isPositive = stock.change >= 0;
-                        const hasHoldings = stock.shares > 0 && stock.avgCost > 0 && stock.price > 0;
-                        const unrealizedPL = hasHoldings ? (stock.price - stock.avgCost) * stock.shares : 0;
-                        const unrealizedPLPercent = hasHoldings ? ((stock.price - stock.avgCost) / stock.avgCost) * 100 : 0;
-                        const plPositive = unrealizedPL >= 0;
                         return (
                             <tr key={stock.symbol} className="hover:bg-white/5 transition-colors group">
                                 <td className="px-6 py-4">
@@ -243,73 +219,38 @@ export default function WatchlistTable({ data, userId, onRefresh, tradeSymbols =
                                         {Math.abs(stock.changePercent).toFixed(2)}%
                                     </div>
                                 </td>
-                                <td className="px-6 py-4 text-gray-300 font-medium">
-                                    {tradeSymbolSet.has(stock.symbol) ? (
-                                        <Link href="/portfolio" className="inline-flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 transition-colors">
-                                            Managed by trades <ExternalLink className="w-3 h-3" />
-                                        </Link>
-                                    ) : (
-                                        <EditableCell
-                                            value={stock.shares}
-                                            symbol={stock.symbol}
-                                            field="shares"
-                                            userId={userId}
-                                            onSaved={handleCellSaved}
-                                        />
-                                    )}
-                                </td>
-                                <td className="px-6 py-4 text-gray-300 font-medium">
-                                    {tradeSymbolSet.has(stock.symbol) ? (
-                                        <span className="text-gray-500 text-xs">—</span>
-                                    ) : (
-                                        <EditableCell
-                                            value={stock.avgCost}
-                                            symbol={stock.symbol}
-                                            field="avgCost"
-                                            userId={userId}
-                                            onSaved={handleCellSaved}
-                                            format={(v) => formatCurrency(v)}
-                                        />
-                                    )}
-                                </td>
-                                <td className="px-6 py-4 font-medium">
-                                    {hasHoldings ? (
-                                        <div className={`flex flex-col ${plPositive ? "text-green-400" : "text-red-400"}`}>
-                                            <span>{plPositive ? "+" : ""}${Math.abs(unrealizedPL).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                                            <span className="text-xs opacity-75">{plPositive ? "+" : ""}{unrealizedPLPercent.toFixed(2)}%</span>
-                                        </div>
-                                    ) : (
-                                        <span className="text-gray-600">—</span>
-                                    )}
-                                </td>
                                 <td className="px-6 py-4 text-gray-400 font-medium">
                                     {formatNumber(stock.marketCap)}
                                 </td>
                                 <td className="px-6 py-4 text-gray-400">
-                                    {(!stock.shares || stock.shares === 0) ? (
-                                        <input
-                                            type="date"
-                                            value={stock.watchSince ? new Date(stock.watchSince).toISOString().split('T')[0] : (stock.addedAt ? new Date(stock.addedAt).toISOString().split('T')[0] : '')}
-                                            onChange={async (e) => {
-                                                const newDate = e.target.value || null;
-                                                try {
-                                                    await updateWatchSince(userId, stock.symbol, newDate);
-                                                    setStocks(current =>
-                                                        current.map(s =>
-                                                            s.symbol === stock.symbol
-                                                                ? { ...s, watchSince: newDate ? new Date(newDate).toISOString() : null }
-                                                                : s
-                                                        )
-                                                    );
-                                                } catch (err) {
-                                                    console.error('Failed to update watchSince:', err);
-                                                }
-                                            }}
-                                            className="bg-white/5 border border-white/10 rounded px-2 py-1 text-sm text-gray-300 outline-none focus:border-blue-500 w-[130px]"
-                                        />
-                                    ) : (
-                                        <span className="text-gray-600">—</span>
-                                    )}
+                                    <input
+                                        type="date"
+                                        value={stock.watchSince ? new Date(stock.watchSince).toISOString().split('T')[0] : (stock.addedAt ? new Date(stock.addedAt).toISOString().split('T')[0] : '')}
+                                        onChange={async (e) => {
+                                            const newDate = e.target.value || null;
+                                            try {
+                                                await updateWatchSince(userId, stock.symbol, newDate);
+                                                setStocks(current =>
+                                                    current.map(s =>
+                                                        s.symbol === stock.symbol
+                                                            ? { ...s, watchSince: newDate ? new Date(newDate).toISOString() : null }
+                                                            : s
+                                                    )
+                                                );
+                                            } catch (err) {
+                                                console.error('Failed to update watchSince:', err);
+                                            }
+                                        }}
+                                        className="bg-white/5 border border-white/10 rounded px-2 py-1 text-sm text-gray-300 outline-none focus:border-blue-500 w-[130px]"
+                                    />
+                                </td>
+                                <td className="px-6 py-4 max-w-[200px]">
+                                    <EditableNotesCell
+                                        value={stock.notes || ""}
+                                        symbol={stock.symbol}
+                                        userId={userId}
+                                        onSaved={handleNotesSaved}
+                                    />
                                 </td>
                                 <td className="px-6 py-4 text-right">
                                     <div className="flex items-center justify-end space-x-3 opacity-80 group-hover:opacity-100 transition-opacity">

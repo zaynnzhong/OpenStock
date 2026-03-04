@@ -1,6 +1,6 @@
 import { auth } from "@/lib/better-auth/auth";
 import { headers } from "next/headers";
-import { getUserWatchlist } from "@/lib/actions/watchlist.actions";
+import { getPortfolioSummary } from "@/lib/actions/portfolio.actions";
 import { getWatchlistData } from "@/lib/actions/finnhub.actions";
 import PortfolioHeatmap, { type HeatmapStockData } from "./PortfolioHeatmap";
 
@@ -14,87 +14,48 @@ export default async function PortfolioHeatmapWrapper() {
     }
 
     const userId = session.user.id;
-    const allWatchlistItems = await getUserWatchlist(userId);
-    // Only show holdings (shares > 0) in the portfolio heatmap
-    const watchlistItems = allWatchlistItems.filter((item: any) => item.shares > 0);
-    const symbols = watchlistItems.map((item: any) => item.symbol);
+    const summary = await getPortfolioSummary(userId);
 
-    if (symbols.length === 0) {
+    if (!summary || summary.positions.length === 0) {
         return <PortfolioHeatmap initialData={[]} symbols={[]} />;
     }
 
+    // Only include positions with shares > 0
+    const activePositions = summary.positions.filter(p => p.shares > 0);
+    if (activePositions.length === 0) {
+        return <PortfolioHeatmap initialData={[]} symbols={[]} />;
+    }
+
+    const symbols = activePositions.map(p => p.symbol);
+
+    // Fetch current prices for daily change data
     let stockData: any[] = [];
     try {
         stockData = await getWatchlistData(symbols);
     } catch {
-        // Rate limit or network error — use watchlist data with zero prices
-        // The client component will poll and fill in real data
+        // Rate limit — client will poll
     }
 
-    // If API failed, create stub data so the heatmap still renders
-    if (!stockData || stockData.length === 0) {
-        stockData = symbols.map((sym: string) => {
-            const item = watchlistItems.find((w: any) => w.symbol === sym);
-            return {
-                symbol: sym,
-                name: item?.company || sym,
-                price: 0,
-                change: 0,
-                changePercent: 0,
-                marketCap: 0,
-            };
-        });
-    }
+    const priceMap = new Map(stockData.map((s: any) => [s.symbol, s]));
 
-    const initialData: HeatmapStockData[] = stockData.map((stock: any) => {
-        const watchlistItem = watchlistItems.find(
-            (item: any) => item.symbol === stock.symbol
-        );
-        const shares = watchlistItem?.shares || 0;
-        const avgCost = watchlistItem?.avgCost || 0;
+    const initialData: HeatmapStockData[] = activePositions.map(pos => {
+        const price = priceMap.get(pos.symbol);
+        const weight = summary.totalValue > 0
+            ? (pos.marketValue / summary.totalValue) * 100
+            : 100 / activePositions.length;
 
         return {
-            symbol: stock.symbol,
-            name: stock.name,
-            price: stock.price,
-            change: stock.change,
-            changePercent: stock.changePercent,
-            marketCap: stock.marketCap || 0,
-            shares,
-            avgCost,
-            weight: 0,
+            symbol: pos.symbol,
+            name: pos.company || price?.name || pos.symbol,
+            price: pos.currentPrice,
+            change: price?.change || 0,
+            changePercent: price?.changePercent || 0,
+            marketCap: price?.marketCap || 0,
+            shares: pos.shares,
+            avgCost: pos.avgCostPerShare,
+            weight,
         };
     });
 
-    // Compute weights: use market value (shares * price) if any holdings exist,
-    // otherwise fall back to market cap, or equal weight
-    const hasAnyHoldings = initialData.some((s) => s.shares > 0);
-
-    if (hasAnyHoldings) {
-        const totalValue = initialData.reduce(
-            (sum, s) => sum + (s.shares > 0 ? s.shares * s.price : 0),
-            0
-        );
-        for (const stock of initialData) {
-            stock.weight =
-                totalValue > 0 && stock.shares > 0
-                    ? ((stock.shares * stock.price) / totalValue) * 100
-                    : 0;
-        }
-    } else {
-        // No holdings at all — use market cap for sizing, or equal weight as last resort
-        const totalMcap = initialData.reduce((sum, s) => sum + (s.marketCap || 0), 0);
-        if (totalMcap > 0) {
-            for (const stock of initialData) {
-                stock.weight = ((stock.marketCap || 1) / totalMcap) * 100;
-            }
-        } else {
-            const equalWeight = 100 / initialData.length;
-            for (const stock of initialData) {
-                stock.weight = equalWeight;
-            }
-        }
-    }
-
-    return <PortfolioHeatmap initialData={initialData} symbols={symbols} userId={userId} />;
+    return <PortfolioHeatmap initialData={initialData} symbols={symbols} />;
 }

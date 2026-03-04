@@ -7,7 +7,6 @@ import { PortfolioSettings } from '@/database/models/portfolio-settings.model';
 import { computePosition, type TradeInput } from '@/lib/portfolio/cost-basis';
 import { getHistoricalPrices, getWatchlistData } from '@/lib/actions/finnhub.actions';
 import { getOpenOptionPrices } from '@/lib/actions/trade.actions';
-import { Watchlist } from '@/database/models/watchlist.model';
 
 function serialize<T>(doc: T): T {
     return JSON.parse(JSON.stringify(doc));
@@ -45,11 +44,7 @@ export async function getPortfolioSummary(userId: string): Promise<PortfolioSumm
         // Continue with no prices
     }
 
-    // Get company names from watchlist
-    const watchlistItems = await Watchlist.find({ userId, symbol: { $in: allSymbols } }).lean();
-    const companyMap = new Map(watchlistItems.map(w => [w.symbol, w.company]));
-
-    const priceMap = new Map(priceData.map(p => [p.symbol, p]));
+    const priceMap = new Map(priceData.map((p: any) => [p.symbol, p]));
 
     const positions: PositionWithPriceData[] = [];
     let totalValue = 0;
@@ -181,7 +176,7 @@ export async function getPortfolioSummary(userId: string): Promise<PortfolioSumm
 
         positions.push({
             symbol,
-            company: companyMap.get(symbol) || price?.name || symbol,
+            company: price?.name || symbol,
             shares: pos.shares,
             costBasis: pos.costBasis,
             avgCostPerShare: pos.avgCostPerShare,

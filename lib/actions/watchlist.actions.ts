@@ -9,9 +9,7 @@ import { revalidatePath } from 'next/cache';
 export async function addToWatchlist(
     userId: string,
     symbol: string,
-    company: string,
-    shares: number = 0,
-    avgCost: number = 0
+    company: string
 ) {
     try {
         await connectToDatabase();
@@ -23,8 +21,6 @@ export async function addToWatchlist(
                 userId,
                 symbol: symbol.toUpperCase(),
                 company,
-                shares,
-                avgCost,
                 addedAt: new Date()
             },
             { upsert: true, new: true }
@@ -36,32 +32,6 @@ export async function addToWatchlist(
     } catch (error) {
         console.error('Error adding to watchlist:', error);
         throw new Error('Failed to add to watchlist');
-    }
-}
-
-export async function updateHoldings(
-    userId: string,
-    symbol: string,
-    shares: number,
-    avgCost: number
-) {
-    console.log('[updateHoldings] called:', { userId, symbol, shares, avgCost });
-    try {
-        await connectToDatabase();
-
-        const updated = await Watchlist.findOneAndUpdate(
-            { userId, symbol: symbol.toUpperCase() },
-            { shares, avgCost },
-            { new: true }
-        );
-
-        console.log('[updateHoldings] result:', updated?.symbol, 'shares:', updated?.shares, 'avgCost:', updated?.avgCost);
-        revalidatePath('/watchlist');
-        revalidatePath('/');
-        return JSON.parse(JSON.stringify(updated));
-    } catch (error) {
-        console.error('[updateHoldings] error:', error);
-        throw new Error('Failed to update holdings');
     }
 }
 
@@ -105,6 +75,24 @@ export async function updateWatchSince(userId: string, symbol: string, date: str
     } catch (error) {
         console.error('Error updating watchSince:', error);
         throw new Error('Failed to update watch since date');
+    }
+}
+
+export async function updateNotes(userId: string, symbol: string, notes: string) {
+    try {
+        await connectToDatabase();
+
+        const updated = await Watchlist.findOneAndUpdate(
+            { userId, symbol: symbol.toUpperCase() },
+            { notes },
+            { new: true }
+        );
+
+        revalidatePath('/watchlist');
+        return JSON.parse(JSON.stringify(updated));
+    } catch (error) {
+        console.error('Error updating notes:', error);
+        throw new Error('Failed to update notes');
     }
 }
 

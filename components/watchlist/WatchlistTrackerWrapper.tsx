@@ -15,14 +15,12 @@ export default async function WatchlistTrackerWrapper() {
 
     const userId = session.user.id;
     const allItems = await getUserWatchlist(userId);
-    // Only watchlist-only items (shares === 0)
-    const watchOnlyItems = allItems.filter((item: any) => !item.shares || item.shares === 0);
 
-    if (watchOnlyItems.length === 0) {
+    if (allItems.length === 0) {
         return <WatchlistTracker stocks={[]} symbols={[]} />;
     }
 
-    const symbols = watchOnlyItems.map((item: any) => item.symbol);
+    const symbols = allItems.map((item: any) => item.symbol);
 
     // Fetch current prices and historical data in parallel
     let stockData: any[] = [];
@@ -33,7 +31,7 @@ export default async function WatchlistTrackerWrapper() {
     }
 
     const historicalResults = await Promise.all(
-        watchOnlyItems.map(async (item: any) => {
+        allItems.map(async (item: any) => {
             const since = item.watchSince || item.addedAt;
             const fromDate = new Date(since).toISOString().split("T")[0];
             const data = await getHistoricalPrices(item.symbol, fromDate);
@@ -43,7 +41,7 @@ export default async function WatchlistTrackerWrapper() {
 
     const historicalMap = new Map(historicalResults.map((r) => [r.symbol, r.data]));
 
-    const stocks = watchOnlyItems.map((item: any) => {
+    const stocks = allItems.map((item: any) => {
         const priceData = stockData.find((s: any) => s.symbol === item.symbol);
         const historical = historicalMap.get(item.symbol);
         const since = item.watchSince || item.addedAt;

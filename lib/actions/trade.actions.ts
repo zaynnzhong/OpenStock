@@ -2,7 +2,6 @@
 
 import { connectToDatabase } from '@/database/mongoose';
 import { Trade, type TradeDocument } from '@/database/models/trade.model';
-import { Watchlist } from '@/database/models/watchlist.model';
 import { PortfolioSettings } from '@/database/models/portfolio-settings.model';
 import { computePosition, computePerTradePL, type TradeInput } from '@/lib/portfolio/cost-basis';
 import { parseCSV, type ParseResult } from '@/lib/portfolio/csv-parser';
@@ -36,8 +35,6 @@ export async function createTrade(data: {
         executedAt: new Date(data.executedAt),
         source: data.source || 'manual',
     });
-
-    await syncWatchlistFromTrades(data.userId, data.symbol.toUpperCase());
 
     // Auto-sync cash balance (non-blocking — trade still succeeds if cash update fails)
     try {
@@ -82,12 +79,6 @@ export async function updateTrade(tradeId: string, userId: string, updates: Part
     Object.assign(trade, updates);
     await trade.save();
 
-    // Sync both old and new symbol if symbol changed
-    await syncWatchlistFromTrades(userId, trade.symbol);
-    if (oldSymbol !== trade.symbol) {
-        await syncWatchlistFromTrades(userId, oldSymbol);
-    }
-
     revalidatePath('/portfolio');
     revalidatePath('/watchlist');
 
@@ -100,7 +91,6 @@ export async function deleteTrade(tradeId: string, userId: string) {
     const trade = await Trade.findOneAndDelete({ _id: tradeId, userId });
     if (!trade) throw new Error('Trade not found');
 
-    await syncWatchlistFromTrades(userId, trade.symbol);
     revalidatePath('/portfolio');
     revalidatePath('/watchlist');
 
@@ -168,10 +158,6 @@ export async function confirmCSVImport(
     }));
 
     const inserted = await Trade.insertMany(docs);
-
-    // Sync all affected symbols
-    const symbols = [...new Set(trades.map(t => t.symbol.toUpperCase()))];
-    await Promise.all(symbols.map(sym => syncWatchlistFromTrades(userId, sym)));
 
     revalidatePath('/portfolio');
     revalidatePath('/watchlist');
@@ -265,47 +251,6 @@ export async function getAllPositions(userId: string) {
     return positions;
 }
 
-export async function syncWatchlistFromTrades(userId: string, symbol: string) {
-    await connectToDatabase();
-
-    const upperSymbol = symbol.toUpperCase();
-    const trades = await Trade.find({ userId, symbol: upperSymbol })
-        .sort({ executedAt: 1 })
-        .lean();
-
-    if (trades.length === 0) return;
-
-    const settings = await PortfolioSettings.findOne({ userId }).lean();
-    const method = settings?.symbolOverrides?.find(o => o.symbol === upperSymbol)?.method
-        || settings?.defaultMethod
-        || 'AVERAGE';
-
-    const tradeInputs: TradeInput[] = trades.map(t => ({
-        type: t.type,
-        quantity: t.quantity,
-        pricePerShare: t.pricePerShare,
-        totalAmount: t.totalAmount,
-        fees: t.fees,
-        executedAt: t.executedAt,
-        optionDetails: t.optionDetails ? {
-            action: t.optionDetails.action,
-            contracts: t.optionDetails.contracts,
-            premiumPerContract: t.optionDetails.premiumPerContract,
-        } : undefined,
-    }));
-
-    const position = computePosition(tradeInputs, method);
-
-    // Update watchlist entry if it exists
-    await Watchlist.findOneAndUpdate(
-        { userId, symbol: upperSymbol },
-        {
-            shares: position.shares,
-            avgCost: position.avgCostPerShare,
-        }
-    );
-}
-
 export async function renameSymbol(userId: string, fromSymbol: string, toSymbol: string): Promise<number> {
     await connectToDatabase();
 
@@ -318,11 +263,6 @@ export async function renameSymbol(userId: string, fromSymbol: string, toSymbol:
     );
 
     if (result.modifiedCount > 0) {
-        // Sync watchlist for both old and new symbols
-        await Promise.all([
-            syncWatchlistFromTrades(userId, from),
-            syncWatchlistFromTrades(userId, to),
-        ]);
         revalidatePath('/portfolio');
         revalidatePath('/watchlist');
     }

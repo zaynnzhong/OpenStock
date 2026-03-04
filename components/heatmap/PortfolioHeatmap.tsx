@@ -2,20 +2,9 @@
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import Link from "next/link";
-import { TrendingUp, Pencil } from "lucide-react";
+import { TrendingUp } from "lucide-react";
 import { squarify } from "@/lib/treemap";
 import { formatChangePercent } from "@/lib/utils";
-import {
-    Dialog,
-    DialogContent,
-    DialogHeader,
-    DialogTitle,
-    DialogDescription,
-    DialogFooter,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Button } from "@/components/ui/button";
 
 export interface HeatmapStockData {
     symbol: string;
@@ -32,7 +21,6 @@ export interface HeatmapStockData {
 interface PortfolioHeatmapProps {
     initialData: HeatmapStockData[];
     symbols: string[];
-    userId?: string;
 }
 
 function getHeatmapBg(changePercent: number): string {
@@ -46,14 +34,10 @@ function getHeatmapBg(changePercent: number): string {
     return `rgba(239, 68, 68, ${intensity})`;
 }
 
-export default function PortfolioHeatmap({ initialData, symbols, userId }: PortfolioHeatmapProps) {
+export default function PortfolioHeatmap({ initialData, symbols }: PortfolioHeatmapProps) {
     const [stocks, setStocks] = useState<HeatmapStockData[]>(initialData);
     const containerRef = useRef<HTMLDivElement>(null);
     const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
-    const [editingStock, setEditingStock] = useState<HeatmapStockData | null>(null);
-    const [editShares, setEditShares] = useState("");
-    const [editAvgCost, setEditAvgCost] = useState("");
-    const [saving, setSaving] = useState(false);
 
     // Measure container
     useEffect(() => {
@@ -74,46 +58,13 @@ export default function PortfolioHeatmap({ initialData, symbols, userId }: Portf
         return () => observer.disconnect();
     }, []);
 
-    // Recalculate weights: price × shares / total portfolio value
-    // Stocks without holdings get a small minimum weight so they still appear
-    const stocksWithWeights = useMemo(() => {
-        const hasAnyHoldings = stocks.some((s) => s.shares > 0);
-
-        if (hasAnyHoldings) {
-            const totalValue = stocks.reduce(
-                (sum, s) => sum + (s.shares > 0 ? s.shares * s.price : 0),
-                0
-            );
-            if (totalValue <= 0) return stocks;
-
-            // Give stocks without holdings a small minimum (2% of total)
-            const minWeight = 2;
-            const holdingsStocks = stocks.filter((s) => s.shares > 0);
-            const noHoldingsStocks = stocks.filter((s) => s.shares <= 0);
-            const reservedWeight = noHoldingsStocks.length * minWeight;
-            const availableWeight = 100 - reservedWeight;
-
-            return stocks.map((s) => ({
-                ...s,
-                weight:
-                    s.shares > 0
-                        ? ((s.shares * s.price) / totalValue) * availableWeight
-                        : minWeight,
-            }));
-        }
-
-        // No holdings — use equal weight
-        const equalWeight = 100 / stocks.length;
-        return stocks.map((s) => ({ ...s, weight: equalWeight }));
-    }, [stocks]);
-
-    // Compute treemap layout
+    // Compute treemap layout using pre-computed weights
     const rects = useMemo(() => {
         if (dimensions.width === 0 || dimensions.height === 0) return [];
-        const items = stocksWithWeights.filter((s) => s.weight > 0);
+        const items = stocks.filter((s) => s.weight > 0);
         if (items.length === 0) return [];
         return squarify(items as any[], dimensions.width, dimensions.height);
-    }, [stocksWithWeights, dimensions]);
+    }, [stocks, dimensions]);
 
     // Poll for price updates
     const pollPrices = useCallback(async () => {
@@ -161,67 +112,8 @@ export default function PortfolioHeatmap({ initialData, symbols, userId }: Portf
         return () => clearInterval(interval);
     }, [pollPrices, symbols.length, stocks]);
 
-    const handleEditClick = (e: React.MouseEvent, stock: HeatmapStockData) => {
-        e.preventDefault();
-        e.stopPropagation();
-        setEditingStock(stock);
-        setEditShares(stock.shares > 0 ? String(stock.shares) : "");
-        setEditAvgCost(stock.avgCost > 0 ? String(stock.avgCost) : "");
-    };
-
-    const [saveError, setSaveError] = useState("");
-
-    const handleSaveHoldings = async () => {
-        if (!editingStock) return;
-        if (!userId) {
-            setSaveError("Not signed in. Please log in to save holdings.");
-            return;
-        }
-        setSaving(true);
-        setSaveError("");
-
-        const sharesNum = parseFloat(editShares) || 0;
-        const avgCostNum = parseFloat(editAvgCost) || 0;
-
-        try {
-            const res = await fetch("/api/holdings", {
-                method: "PUT",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    userId,
-                    symbol: editingStock.symbol,
-                    shares: sharesNum,
-                    avgCost: avgCostNum,
-                }),
-            });
-
-            if (!res.ok) {
-                const data = await res.json().catch(() => ({}));
-                throw new Error(data.error || "Save failed");
-            }
-
-            // Update local state immediately
-            setStocks((current) =>
-                current.map((s) =>
-                    s.symbol === editingStock.symbol
-                        ? { ...s, shares: sharesNum, avgCost: avgCostNum }
-                        : s
-                )
-            );
-            setEditingStock(null);
-        } catch (err) {
-            console.error("Failed to update holdings:", err);
-            setSaveError("Failed to save. Please try again.");
-        } finally {
-            setSaving(false);
-        }
-    };
-
-    const hasAnyHoldings = stocks.some((s) => s.shares > 0);
-
     // Today's return: sum of (daily change * shares) for all holdings
     const todaysReturn = useMemo(() => {
-        if (!hasAnyHoldings) return { value: 0, percent: 0 };
         const totalChange = stocks.reduce(
             (sum, s) => sum + (s.shares > 0 ? s.change * s.shares : 0),
             0
@@ -232,7 +124,7 @@ export default function PortfolioHeatmap({ initialData, symbols, userId }: Portf
         );
         const pct = totalPrevValue > 0 ? (totalChange / totalPrevValue) * 100 : 0;
         return { value: totalChange, percent: pct };
-    }, [stocks, hasAnyHoldings]);
+    }, [stocks]);
 
     if (stocks.length === 0) {
         return (
@@ -243,10 +135,10 @@ export default function PortfolioHeatmap({ initialData, symbols, userId }: Portf
                 <div className="flex flex-col items-center justify-center py-16 px-6 bg-gray-900/30 rounded-xl border border-gray-800 border-dashed">
                     <TrendingUp className="w-12 h-12 text-gray-600 mb-4" />
                     <h4 className="text-lg font-semibold text-gray-300 mb-2">
-                        No stocks in your watchlist
+                        No positions yet
                     </h4>
                     <p className="text-gray-500 text-center max-w-sm">
-                        Add stocks to your watchlist to see your portfolio heatmap.
+                        Log trades in Portfolio to see your heatmap.
                     </p>
                 </div>
             </div>
@@ -260,30 +152,17 @@ export default function PortfolioHeatmap({ initialData, symbols, userId }: Portf
                     <h3 className="font-semibold text-2xl text-gray-100">
                         Portfolio Heatmap
                     </h3>
-                    {!hasAnyHoldings ? (
-                        <p className="text-xs text-gray-500 mt-1">
-                            Click the pencil icon on any block to add your holdings
-                        </p>
-                    ) : !stocks.some((s) => s.avgCost > 0) ? (
-                        <p className="text-xs text-gray-500 mt-1">
-                            Click the pencil icon to add your avg cost and see unrealized P/L
-                        </p>
-                    ) : null}
                 </div>
                 <div className="flex items-center gap-4">
-                    {hasAnyHoldings && (
-                        <div className="text-right">
-                            <p className="text-xs text-gray-500">Today&apos;s Return</p>
-                            <p className={`text-sm font-semibold ${todaysReturn.value >= 0 ? "text-green-400" : "text-red-400"}`}>
-                                {todaysReturn.value >= 0 ? "+" : ""}${Math.abs(todaysReturn.value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                {" "}({todaysReturn.percent >= 0 ? "+" : ""}{todaysReturn.percent.toFixed(2)}%)
-                            </p>
-                        </div>
-                    )}
+                    <div className="text-right">
+                        <p className="text-xs text-gray-500">Today&apos;s Return</p>
+                        <p className={`text-sm font-semibold ${todaysReturn.value >= 0 ? "text-green-400" : "text-red-400"}`}>
+                            {todaysReturn.value >= 0 ? "+" : ""}${Math.abs(todaysReturn.value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            {" "}({todaysReturn.percent >= 0 ? "+" : ""}{todaysReturn.percent.toFixed(2)}%)
+                        </p>
+                    </div>
                     <span className="text-xs text-gray-500">
-                        {hasAnyHoldings
-                            ? "Sized by position value"
-                            : "Equal weight (no holdings set)"}
+                        Sized by position value
                     </span>
                 </div>
             </div>
@@ -332,15 +211,6 @@ export default function PortfolioHeatmap({ initialData, symbols, userId }: Portf
                                 backgroundColor: getHeatmapBg(stock.changePercent),
                             }}
                         >
-                            {/* Edit holdings button */}
-                            <button
-                                onClick={(e) => handleEditClick(e, stock)}
-                                className="absolute top-0.5 right-0.5 p-0.5 rounded opacity-0 group-hover/block:opacity-100 transition-opacity bg-black/40 hover:bg-black/60 z-20"
-                                title="Edit holdings"
-                            >
-                                <Pencil className="w-2.5 h-2.5 text-white/80" />
-                            </button>
-
                             {/* Tiny blocks: just symbol */}
                             {isTiny && (
                                 <span className="font-bold text-white text-[10px] leading-none truncate w-full">
@@ -433,74 +303,6 @@ export default function PortfolioHeatmap({ initialData, symbols, userId }: Portf
                     );
                 })}
             </div>
-
-            {/* Edit Holdings Dialog */}
-            <Dialog
-                open={!!editingStock}
-                onOpenChange={(open) => !open && setEditingStock(null)}
-            >
-                <DialogContent className="bg-gray-950 border-white/10">
-                    <DialogHeader>
-                        <DialogTitle className="text-gray-100">
-                            Edit Holdings — {editingStock?.symbol}
-                        </DialogTitle>
-                        <DialogDescription>
-                            Enter how many shares you hold to weight the heatmap by position size.
-                        </DialogDescription>
-                    </DialogHeader>
-                    <div className="space-y-4 py-2">
-                        <div className="space-y-2">
-                            <Label htmlFor="edit-shares" className="text-gray-300">
-                                Number of Shares
-                            </Label>
-                            <Input
-                                id="edit-shares"
-                                type="number"
-                                min="0"
-                                step="any"
-                                placeholder="e.g. 50"
-                                value={editShares}
-                                onChange={(e) => setEditShares(e.target.value)}
-                                className="form-input"
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <Label htmlFor="edit-avgcost" className="text-gray-300">
-                                Average Cost per Share (USD)
-                            </Label>
-                            <Input
-                                id="edit-avgcost"
-                                type="number"
-                                min="0"
-                                step="any"
-                                placeholder="e.g. 25.50"
-                                value={editAvgCost}
-                                onChange={(e) => setEditAvgCost(e.target.value)}
-                                className="form-input"
-                            />
-                        </div>
-                    </div>
-                    {saveError && (
-                        <p className="text-red-400 text-sm px-1">{saveError}</p>
-                    )}
-                    <DialogFooter>
-                        <Button
-                            variant="ghost"
-                            onClick={() => setEditingStock(null)}
-                            className="text-gray-400"
-                        >
-                            Cancel
-                        </Button>
-                        <Button
-                            onClick={handleSaveHoldings}
-                            disabled={saving}
-                            className="bg-white text-black hover:bg-gray-200"
-                        >
-                            {saving ? "Saving..." : "Save"}
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
         </div>
     );
 }
