@@ -6,6 +6,7 @@ import { DailySnapshot } from '@/database/models/daily-snapshot.model';
 import { PortfolioSettings } from '@/database/models/portfolio-settings.model';
 import { computePosition, type TradeInput } from '@/lib/portfolio/cost-basis';
 import { getHistoricalPrices, getWatchlistData } from '@/lib/actions/finnhub.actions';
+import { getOpenOptionPrices } from '@/lib/actions/trade.actions';
 import { Watchlist } from '@/database/models/watchlist.model';
 
 function serialize<T>(doc: T): T {
@@ -32,10 +33,14 @@ export async function getPortfolioSummary(userId: string): Promise<PortfolioSumm
     // Get all symbols that have positions
     const allSymbols = [...bySymbol.keys()];
 
-    // Fetch current prices
+    // Fetch current prices and open option prices in parallel
     let priceData: any[] = [];
+    let openOptionPrices: Record<string, { bid: number; ask: number; mid: number; lastPrice: number }> = {};
     try {
-        priceData = await getWatchlistData(allSymbols);
+        [priceData, openOptionPrices] = await Promise.all([
+            getWatchlistData(allSymbols),
+            getOpenOptionPrices(userId),
+        ]);
     } catch {
         // Continue with no prices
     }
@@ -52,6 +57,8 @@ export async function getPortfolioSummary(userId: string): Promise<PortfolioSumm
     let totalRealizedPL = 0;
     let totalUnrealizedPL = 0;
     let totalOptionsPremium = 0;
+    let totalOptionsClosedPL = 0;
+    let totalOpenOptionsValue = 0;
     let totalDividends = 0;
 
     for (const [symbol, symbolTrades] of bySymbol) {
@@ -74,15 +81,102 @@ export async function getPortfolioSummary(userId: string): Promise<PortfolioSumm
         const pos = computePosition(tradeInputs, method);
         const price = priceMap.get(symbol);
         const currentPrice = price?.price || 0;
-        const marketValue = pos.shares * currentPrice;
-        const unrealizedPL = pos.shares > 0 && currentPrice > 0
-            ? marketValue - pos.costBasis
+
+        // --- Compute open option positions ---
+        const optionGroups = new Map<string, {
+            contractType: 'CALL' | 'PUT';
+            direction: 'long' | 'short';
+            strikePrice: number;
+            expirationDate: string;
+            netContracts: number;
+            totalOpeningPremium: number;
+            openingContractCount: number;
+        }>();
+
+        for (const t of symbolTrades) {
+            if (t.type !== 'OPTION_PREMIUM' || !t.optionDetails) continue;
+            const d = t.optionDetails;
+            const expDate = d.expirationDate ? new Date(d.expirationDate).toISOString().split('T')[0] : '';
+            const key = `${symbol}|${d.contractType}|${d.strikePrice}|${expDate}`;
+            const contracts = d.contracts || 1;
+            const isOpen = d.action === 'BUY_TO_OPEN' || d.action === 'SELL_TO_OPEN';
+
+            if (!optionGroups.has(key)) {
+                optionGroups.set(key, {
+                    contractType: d.contractType,
+                    direction: d.action === 'BUY_TO_OPEN' ? 'long' : 'short',
+                    strikePrice: d.strikePrice,
+                    expirationDate: expDate,
+                    netContracts: 0,
+                    totalOpeningPremium: 0,
+                    openingContractCount: 0,
+                });
+            }
+            const group = optionGroups.get(key)!;
+            if (isOpen) {
+                group.netContracts += contracts;
+                group.totalOpeningPremium += d.premiumPerContract * contracts;
+                group.openingContractCount += contracts;
+            } else {
+                group.netContracts -= contracts;
+            }
+        }
+
+        const openOptions: OpenOptionPosition[] = [];
+        let openOptionsNetPremium = 0;
+
+        for (const [key, group] of optionGroups) {
+            if (group.netContracts <= 0) continue;
+            const avgPremium = group.openingContractCount > 0
+                ? group.totalOpeningPremium / group.openingContractCount
+                : 0;
+            const totalCost = avgPremium * group.netContracts * 100;
+            const livePrice = openOptionPrices[key]?.mid || 0;
+            const currentValue = livePrice * group.netContracts * 100;
+            const unrealizedPL = group.direction === 'long'
+                ? currentValue - totalCost
+                : totalCost - currentValue;
+
+            // Net premium impact of this open position on optionsPremiumNet
+            // BTO subtracts from optionsPremiumNet, STO adds
+            if (group.direction === 'long') {
+                openOptionsNetPremium -= totalCost;
+            } else {
+                openOptionsNetPremium += totalCost;
+            }
+
+            openOptions.push({
+                contractType: group.contractType,
+                direction: group.direction,
+                strikePrice: group.strikePrice,
+                expirationDate: group.expirationDate,
+                netContracts: group.netContracts,
+                avgPremium,
+                totalCost,
+                currentPrice: livePrice,
+                currentValue,
+                unrealizedPL,
+            });
+        }
+
+        // Separate closed P/L from total optionsPremiumNet
+        const optionsClosedPL = pos.optionsPremiumNet - openOptionsNetPremium;
+
+        // Add open option values to market value and unrealized P/L
+        const openOptionsValue = openOptions.reduce((sum, o) => sum + o.currentValue, 0);
+        const openOptionsUnrealizedPL = openOptions.reduce((sum, o) => sum + o.unrealizedPL, 0);
+
+        const marketValue = pos.shares * currentPrice + openOptionsValue;
+        const stockUnrealizedPL = pos.shares > 0 && currentPrice > 0
+            ? (pos.shares * currentPrice) - pos.costBasis
             : 0;
-        const totalReturn = pos.realizedPL + unrealizedPL + pos.optionsPremiumNet + pos.dividendsReceived;
-        const totalReturnPercent = pos.costBasis > 0 ? (totalReturn / pos.costBasis) * 100 : 0;
+        const unrealizedPL = stockUnrealizedPL + openOptionsUnrealizedPL;
+        const totalReturn = pos.realizedPL + unrealizedPL + optionsClosedPL + pos.dividendsReceived;
+        const totalInvested = pos.costBasis + openOptions.reduce((sum, o) => sum + o.totalCost, 0);
+        const totalReturnPercent = totalInvested > 0 ? (totalReturn / totalInvested) * 100 : 0;
 
         const adjustedCostPerShare = pos.shares > 0
-            ? (pos.costBasis - pos.optionsPremiumNet - pos.dividendsReceived - pos.realizedPL) / pos.shares
+            ? (pos.costBasis - optionsClosedPL - pos.dividendsReceived - pos.realizedPL) / pos.shares
             : 0;
 
         positions.push({
@@ -93,7 +187,7 @@ export async function getPortfolioSummary(userId: string): Promise<PortfolioSumm
             avgCostPerShare: pos.avgCostPerShare,
             adjustedCostBasis: pos.adjustedCostBasis,
             adjustedCostPerShare,
-            realizedPL: pos.realizedPL + pos.optionsPremiumNet,
+            realizedPL: pos.realizedPL,
             unrealizedPL,
             optionsPremiumNet: pos.optionsPremiumNet,
             dividendsReceived: pos.dividendsReceived,
@@ -107,13 +201,17 @@ export async function getPortfolioSummary(userId: string): Promise<PortfolioSumm
                 costPerShare: l.costPerShare,
                 date: l.date.toISOString(),
             })),
+            openOptions,
+            optionsClosedPL,
         });
 
         totalValue += marketValue;
         totalCostBasis += pos.costBasis;
-        totalRealizedPL += pos.realizedPL + pos.optionsPremiumNet;
+        totalRealizedPL += pos.realizedPL;
         totalUnrealizedPL += unrealizedPL;
         totalOptionsPremium += pos.optionsPremiumNet;
+        totalOptionsClosedPL += optionsClosedPL;
+        totalOpenOptionsValue += openOptionsValue;
         totalDividends += pos.dividendsReceived;
     }
 
@@ -133,6 +231,8 @@ export async function getPortfolioSummary(userId: string): Promise<PortfolioSumm
         totalRealizedPL,
         totalUnrealizedPL,
         totalOptionsPremium,
+        totalOptionsClosedPL,
+        totalOpenOptionsValue,
         totalDividends,
         todayReturn,
         todayReturnPercent,

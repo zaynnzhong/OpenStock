@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { X, ArrowRightLeft, ChevronLeft, ChevronRight, ChevronDown, ChevronRight as ChevronRightIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { getTradesWithPL, deleteTrade, updateTrade, renameSymbol, getOpenOptionPrices, type OptionPriceData } from "@/lib/actions/trade.actions";
+import { getWatchlistData } from "@/lib/actions/finnhub.actions";
 import StockTradeTable from "./StockTradeTable";
 import OptionTradeTable from "./OptionTradeTable";
 import EditOptionTradeModal from "./EditOptionTradeModal";
@@ -36,6 +37,7 @@ export default function TradeHistory({ userId }: TradeHistoryProps) {
     const [optionOpen, setOptionOpen] = useState(true);
     const [optionStatusFilter, setOptionStatusFilter] = useState<'' | 'Open' | 'Closed'>('');
     const [optionPrices, setOptionPrices] = useState<Record<string, OptionPriceData>>({});
+    const [stockPrices, setStockPrices] = useState<Record<string, number>>({});
 
     // Shared state
     const [filterSymbol, setFilterSymbol] = useState("");
@@ -95,6 +97,16 @@ export default function TradeHistory({ userId }: TradeHistoryProps) {
         try {
             const prices = await getOpenOptionPrices(userId, filterSymbol || undefined);
             setOptionPrices(prices);
+            // Fetch stock prices for symbols with open options
+            const symbols = [...new Set(Object.keys(prices).map(k => k.split('|')[0]))];
+            if (symbols.length > 0) {
+                const data = await getWatchlistData(symbols);
+                const map: Record<string, number> = {};
+                for (const d of data) {
+                    if (d.symbol && d.price) map[d.symbol] = d.price;
+                }
+                setStockPrices(map);
+            }
         } catch {
             // Keep existing data
         }
@@ -335,6 +347,7 @@ export default function TradeHistory({ userId }: TradeHistoryProps) {
                             loading={optionLoading}
                             statusFilter={optionStatusFilter}
                             currentPrices={optionPrices}
+                            stockPrices={stockPrices}
                             onEdit={openEdit}
                             onDelete={handleDelete}
                         />

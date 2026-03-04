@@ -252,6 +252,19 @@ declare global {
         runningAdjustedCostPerShare?: number;
     };
 
+    type OpenOptionPosition = {
+        contractType: 'CALL' | 'PUT';
+        direction: 'long' | 'short';
+        strikePrice: number;
+        expirationDate: string;
+        netContracts: number;
+        avgPremium: number;
+        totalCost: number;
+        currentPrice: number;
+        currentValue: number;
+        unrealizedPL: number;
+    };
+
     type PositionWithPriceData = {
         symbol: string;
         company: string;
@@ -270,6 +283,8 @@ declare global {
         totalReturnPercent: number;
         costBasisMethod: CostBasisMethod;
         lots: { shares: number; costPerShare: number; date: string }[];
+        openOptions: OpenOptionPosition[];
+        optionsClosedPL: number;
     };
 
     type PortfolioSummaryData = {
@@ -278,6 +293,8 @@ declare global {
         totalRealizedPL: number;
         totalUnrealizedPL: number;
         totalOptionsPremium: number;
+        totalOptionsClosedPL: number;
+        totalOpenOptionsValue: number;
         totalDividends: number;
         todayReturn: number;
         todayReturnPercent: number;
@@ -291,6 +308,53 @@ declare global {
         realizedPL: number;
         unrealizedPL: number;
         totalPL: number;
+    };
+
+    // AI Portfolio Review — CRO Risk Mandate structured output
+    type PortfolioReviewJSON = {
+        structuralAudit: {
+            assessment: string;
+            signal: 'GREEN' | 'YELLOW' | 'RED';
+            totalSlots: number;
+            surplusCount: number;
+            coreSlots: { symbol: string; weight: number; notionalExposure: string; note: string }[];
+            satelliteSlots: { symbol: string; weight: number; note: string }[];
+            betaSensitivity: { scenario: string; impact: number; description: string }[];
+            singlePointOfFailure: string;
+        };
+        liquidationList: {
+            analysis: string;
+            zombiePositions: { symbol: string; weight: number; pnlPct: number; reason: string }[];
+            redundancies: { keep: string; kill: string[]; reason: string }[];
+            invalidTheses: { symbol: string; lossPct: number; reason: string }[];
+        };
+        deepDive: {
+            coreAnalysis: {
+                symbol: string;
+                analysis: string;
+                deltaExposure: string;
+                keyLevels: string;
+                thetaRisk: string;
+            }[];
+            satelliteAnalysis: {
+                symbol: string;
+                analysis: string;
+                profitTranches: string;
+                reentryLevel: string;
+            }[];
+        };
+        executionOrders: {
+            sellOrders: {
+                priority: number;
+                symbol: string;
+                action: string;
+                reason: string;
+            }[];
+            circuitBreaker: {
+                triggerValue: number;
+                description: string;
+            };
+        };
     };
 }
 

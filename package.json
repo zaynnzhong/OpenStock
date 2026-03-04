@@ -10,6 +10,7 @@
     "test:db": "node scripts/test-db.mjs"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "@radix-ui/react-avatar": "^1.1.10",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-dropdown-menu": "^2.1.16",
@@ -39,8 +40,10 @@
     "react-circle-flags": "^0.0.23",
     "react-dom": "19.1.0",
     "react-hook-form": "^7.63.0",
+    "react-markdown": "^10.1.0",
     "react-select-country-list": "^2.2.3",
     "recharts": "^3.7.0",
+    "remark-gfm": "^4.0.1",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.3.1",
     "tweetnacl": "^1.0.3"

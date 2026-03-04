@@ -22,6 +22,81 @@ async function fetchJSON<T>(url: string, revalidateSeconds?: number): Promise<T>
 
 export { fetchJSON };
 
+export type OHLCVBar = {
+    date: string;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    volume: number;
+};
+
+const ohlcvTfMap: Record<string, { interval: string; range: string }> = {
+    "5": { interval: "5m", range: "5d" },
+    "15": { interval: "15m", range: "5d" },
+    "60": { interval: "60m", range: "30d" },
+    "D": { interval: "1d", range: "1y" },
+    "W": { interval: "1wk", range: "5y" },
+    "M": { interval: "1mo", range: "10y" },
+};
+
+export async function getOHLCV(
+    symbol: string,
+    timeframe: string = "D",
+    barCount: number = 100
+): Promise<OHLCVBar[]> {
+    try {
+        const tf = ohlcvTfMap[timeframe] || ohlcvTfMap["D"];
+        const isIntraday = ["5", "15", "60"].includes(timeframe);
+        const revalidate = isIntraday ? 60 : 3600;
+
+        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${tf.range}&interval=${tf.interval}`;
+        const res = await fetch(url, {
+            headers: { "User-Agent": "Mozilla/5.0" },
+            cache: "force-cache",
+            next: { revalidate },
+        } as any);
+
+        if (!res.ok) return [];
+        const data = await res.json();
+
+        const result = data?.chart?.result?.[0];
+        if (!result) return [];
+
+        const timestamps: number[] = result.timestamp || [];
+        const quote = result.indicators?.quote?.[0];
+        if (!quote) return [];
+
+        const bars: OHLCVBar[] = [];
+        for (let i = 0; i < timestamps.length; i++) {
+            const o = quote.open?.[i];
+            const h = quote.high?.[i];
+            const l = quote.low?.[i];
+            const c = quote.close?.[i];
+            const v = quote.volume?.[i];
+            if (c == null) continue;
+
+            const dateStr = isIntraday
+                ? new Date(timestamps[i] * 1000).toISOString().replace('T', ' ').slice(0, 16)
+                : new Date(timestamps[i] * 1000).toISOString().split('T')[0];
+
+            bars.push({
+                date: dateStr,
+                open: o ?? c,
+                high: h ?? c,
+                low: l ?? c,
+                close: c,
+                volume: v ?? 0,
+            });
+        }
+
+        return bars.slice(-barCount);
+    } catch (e) {
+        console.error(`Error fetching OHLCV for`, symbol, timeframe, e);
+        return [];
+    }
+}
+
 export async function getSMA(symbol: string, shortPeriod: number = 20, longPeriod: number = 50, timeframe: string = "D") {
     try {
         // Map timeframe to Yahoo Finance interval/range

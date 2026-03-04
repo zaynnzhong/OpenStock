@@ -21,10 +21,12 @@ export default function PositionBreakdown({ positions }: PositionBreakdownProps)
         });
     };
 
-    // Sort: active positions first (shares > 0), then by market value desc
+    // Sort: active positions first (shares > 0 or open options), then by market value desc
     const sorted = [...positions].sort((a, b) => {
-        if (a.shares > 0 && b.shares === 0) return -1;
-        if (a.shares === 0 && b.shares > 0) return 1;
+        const aActive = a.shares > 0 || (a.openOptions?.length ?? 0) > 0;
+        const bActive = b.shares > 0 || (b.openOptions?.length ?? 0) > 0;
+        if (aActive && !bActive) return -1;
+        if (!aActive && bActive) return 1;
         return b.marketValue - a.marketValue;
     });
 
@@ -89,11 +91,12 @@ function PositionRow({
     realizedPositive: boolean;
     onToggle: () => void;
 }) {
-    const stockPL = pos.realizedPL - pos.optionsPremiumNet;
+    const stockPL = pos.realizedPL;
     const hasStockPL = stockPL !== 0;
-    const hasOptionPL = pos.optionsPremiumNet !== 0;
+    const hasOpenOptions = (pos.openOptions?.length ?? 0) > 0;
+    const hasClosedOptionPL = (pos.optionsClosedPL ?? 0) !== 0;
     const hasDividends = pos.dividendsReceived > 0;
-    const hasBreakdown = hasStockPL || hasOptionPL || hasDividends;
+    const hasBreakdown = hasStockPL || hasOpenOptions || hasClosedOptionPL || hasDividends;
 
     return (
         <>
@@ -151,6 +154,29 @@ function PositionRow({
             </tr>
             {isExpanded && hasBreakdown && (
                 <>
+                    {hasOpenOptions && pos.openOptions.map((opt, i) => {
+                        const dirLabel = opt.direction === 'long' ? 'BTO' : 'STO';
+                        const typeLabel = opt.contractType === 'CALL' ? 'C' : 'P';
+                        const expLabel = new Date(opt.expirationDate + 'T00:00:00').toLocaleDateString('en-US', { month: '2-digit', day: '2-digit' });
+                        const label = `${dirLabel} ${opt.netContracts}x $${opt.strikePrice}${typeLabel} ${expLabel}`;
+                        const plPositive = opt.unrealizedPL >= 0;
+                        return (
+                            <tr key={`opt-${i}`} className="bg-white/[0.02]">
+                                <td className="px-4 py-2"></td>
+                                <td className="px-4 py-2 text-xs text-purple-400 pl-8">{label}</td>
+                                <td className="px-4 py-2 text-xs text-gray-500">{opt.netContracts} ct</td>
+                                <td className="px-4 py-2 text-xs text-gray-400">{formatCurrency(opt.avgPremium)}</td>
+                                <td className="px-4 py-2 text-xs text-gray-500">{formatCurrency(opt.totalCost)}</td>
+                                <td className="px-4 py-2 text-xs text-white">{opt.currentPrice > 0 ? formatCurrency(opt.currentPrice) : '—'}</td>
+                                <td className="px-4 py-2 text-xs text-gray-300">{opt.currentValue > 0 ? formatCurrency(opt.currentValue) : '—'}</td>
+                                <td className={`px-4 py-2 text-xs font-medium ${plPositive ? 'text-green-400' : 'text-red-400'}`}>
+                                    {opt.currentPrice > 0 ? `${plPositive ? '+' : ''}${formatCurrency(opt.unrealizedPL)}` : '—'}
+                                </td>
+                                <td className="px-4 py-2"></td>
+                                <td className="px-4 py-2"></td>
+                            </tr>
+                        );
+                    })}
                     {hasStockPL && (
                         <tr className="bg-white/[0.02]">
                             <td className="px-4 py-2"></td>
@@ -162,13 +188,13 @@ function PositionRow({
                             <td className="px-4 py-2"></td>
                         </tr>
                     )}
-                    {hasOptionPL && (
+                    {hasClosedOptionPL && (
                         <tr className="bg-white/[0.02]">
                             <td className="px-4 py-2"></td>
-                            <td className="px-4 py-2 text-xs text-purple-400 pl-8">Options P/L</td>
+                            <td className="px-4 py-2 text-xs text-purple-400 pl-8">Closed Options P/L</td>
                             <td className="px-4 py-2" colSpan={6}></td>
-                            <td className={`px-4 py-2 text-xs font-medium ${pos.optionsPremiumNet >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                {pos.optionsPremiumNet >= 0 ? '+' : ''}{formatCurrency(pos.optionsPremiumNet)}
+                            <td className={`px-4 py-2 text-xs font-medium ${(pos.optionsClosedPL ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                {(pos.optionsClosedPL ?? 0) >= 0 ? '+' : ''}{formatCurrency(pos.optionsClosedPL ?? 0)}
                             </td>
                             <td className="px-4 py-2"></td>
                         </tr>

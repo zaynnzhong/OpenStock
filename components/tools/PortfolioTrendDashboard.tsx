@@ -12,7 +12,11 @@ import {
     Tooltip,
     ResponsiveContainer,
 } from "recharts";
-import { TrendingUp, TrendingDown, Minus, ExternalLink, MessageSquare, ChevronDown, ChevronUp, BarChart3 } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, ExternalLink, MessageSquare, ChevronDown, ChevronUp, BarChart3, Sparkles, Loader2, RefreshCw } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { getPortfolioSummary } from "@/lib/actions/portfolio.actions";
 import {
     getBatchTrends,
@@ -25,6 +29,13 @@ import {
     type SocialSentimentSummary,
     type PolymarketEvent,
 } from "@/lib/actions/social.actions";
+import {
+    analyzeDirection,
+    analyzeEntry,
+    analyzeOptions,
+    analyzePosition,
+    type AnalysisResult,
+} from "@/lib/actions/gemini.actions";
 
 /* ── Types ───────────────────────────────────────────────────────────── */
 
@@ -40,6 +51,8 @@ type ChartRange = '1M' | '3M' | '6M' | '1Y';
 const RANGES: ChartRange[] = ['1M', '3M', '6M', '1Y'];
 
 type SourceFilter = 'all' | 'reddit' | 'hackernews' | 'news';
+
+type AIAnalysisType = 'direction' | 'entry' | 'options' | 'position';
 
 /* ── Sparkline (tiny 30-day chart) ───────────────────────────────────── */
 
@@ -192,9 +205,166 @@ function PolymarketRow({ event }: { event: PolymarketEvent }) {
     );
 }
 
+/* ── Markdown Renderer ───────────────────────────────────────────────── */
+
+export function AnalysisMarkdown({ content }: { content: string }) {
+    return (
+        <div className="prose prose-invert prose-sm max-w-none
+            prose-headings:text-gray-100 prose-headings:font-semibold
+            prose-h2:mt-6 prose-h2:mb-3 prose-h2:pb-2 prose-h2:border-b prose-h2:border-teal-500/20
+            prose-h3:mt-4 prose-h3:mb-2 prose-h3:text-teal-300
+            prose-h4:mt-3 prose-h4:mb-1
+            prose-p:text-gray-300 prose-p:leading-relaxed
+            prose-strong:text-white
+            prose-li:text-gray-300 prose-li:marker:text-teal-400
+            prose-table:text-xs
+            prose-thead:bg-white/5
+            prose-th:text-gray-400 prose-th:font-medium prose-th:px-3 prose-th:py-2 prose-th:border-white/10
+            prose-td:text-gray-300 prose-td:px-3 prose-td:py-1.5 prose-td:border-white/10
+            prose-tr:border-white/5
+            prose-blockquote:border-teal-500/40 prose-blockquote:text-gray-400 prose-blockquote:not-italic
+            prose-code:text-teal-400 prose-code:bg-white/5 prose-code:px-1.5 prose-code:rounded prose-code:text-xs
+            prose-a:text-teal-400 prose-a:no-underline hover:prose-a:underline
+        ">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+        </div>
+    );
+}
+
+/* ── AI Analysis Panel (per-holding) ─────────────────────────────────── */
+
+function AIAnalysisPanel({ symbol, userId }: { symbol: string; userId: string }) {
+    const [activeAnalysis, setActiveAnalysis] = useState<AIAnalysisType | null>(null);
+    const [result, setResult] = useState<AnalysisResult | null>(null);
+    const [loading, setLoading] = useState(false);
+
+    const runAnalysis = useCallback(async (type: AIAnalysisType) => {
+        setActiveAnalysis(type);
+        setResult(null);
+        setLoading(true);
+        try {
+            let res: AnalysisResult;
+            switch (type) {
+                case 'direction':
+                    res = await analyzeDirection(symbol);
+                    break;
+                case 'entry':
+                    res = await analyzeEntry(symbol);
+                    break;
+                case 'options':
+                    res = await analyzeOptions(symbol, userId);
+                    break;
+                case 'position':
+                    res = await analyzePosition(symbol, userId);
+                    break;
+            }
+            setResult(res);
+        } catch (e: any) {
+            setResult({ content: '', model: '', timestamp: Date.now(), error: e?.message || 'Analysis failed' });
+        } finally {
+            setLoading(false);
+        }
+    }, [symbol, userId]);
+
+    const buttons: { type: AIAnalysisType; emoji: string; label: string }[] = [
+        { type: 'direction', emoji: '\u{1F4CA}', label: '\u591A\u7A7A\u65B9\u5411' },
+        { type: 'entry', emoji: '\u{1F3AF}', label: 'PO3 \u8FDB\u573A' },
+        { type: 'options', emoji: '\u{1F4C8}', label: '\u671F\u6743\u5206\u6790' },
+        { type: 'position', emoji: '\u{1F4BC}', label: '\u6301\u4ED3\u7BA1\u7406' },
+    ];
+
+    const analysisLabels: Record<AIAnalysisType, string> = {
+        direction: 'Direction Analysis',
+        entry: 'Entry Analysis',
+        options: 'Options Analysis',
+        position: 'Position Analysis',
+    };
+
+    return (
+        <div className="space-y-3">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {buttons.map(b => (
+                    <button
+                        key={b.type}
+                        onClick={() => runAnalysis(b.type)}
+                        disabled={loading}
+                        className={`px-3 py-2 text-xs font-medium rounded-lg transition-all ${
+                            activeAnalysis === b.type && loading
+                                ? 'bg-teal-500/20 text-teal-300 border border-teal-500/30'
+                                : activeAnalysis === b.type && result
+                                ? 'bg-teal-500/15 text-teal-300 border border-teal-500/20'
+                                : 'bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10 hover:text-white'
+                        } disabled:opacity-50`}
+                    >
+                        {b.emoji} {b.label}
+                    </button>
+                ))}
+            </div>
+
+            {loading && (
+                <Card>
+                    <CardContent className="py-6">
+                        <div className="space-y-3 animate-pulse">
+                            <div className="flex items-center gap-2 mb-2">
+                                <Loader2 className="h-4 w-4 animate-spin text-teal-400" />
+                                <span className="text-xs text-gray-500">Analyzing {symbol} with Gemini...</span>
+                            </div>
+                            <div className="h-2.5 bg-white/5 rounded w-3/4" />
+                            <div className="h-2.5 bg-white/5 rounded w-full" />
+                            <div className="h-2.5 bg-white/5 rounded w-5/6" />
+                            <div className="h-2.5 bg-white/5 rounded w-2/3" />
+                        </div>
+                    </CardContent>
+                </Card>
+            )}
+
+            {result && !loading && (
+                <Card className={result.error ? 'border-red-500/20 bg-red-500/5' : ''}>
+                    <CardContent className="pt-5">
+                        {result.error ? (
+                            <div className="flex items-center justify-between">
+                                <p className="text-sm text-red-400">{result.error}</p>
+                                <button
+                                    onClick={() => activeAnalysis && runAnalysis(activeAnalysis)}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg
+                                        bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-colors"
+                                >
+                                    <RefreshCw className="h-3 w-3" /> Retry
+                                </button>
+                            </div>
+                        ) : (
+                            <>
+                                <div className="flex items-center gap-2 mb-3">
+                                    <Badge className="bg-teal-500/15 text-teal-400 border-teal-500/20">
+                                        <Sparkles className="h-3 w-3 mr-1" />
+                                        {activeAnalysis ? analysisLabels[activeAnalysis] : 'Analysis'}
+                                    </Badge>
+                                </div>
+                                <div className="max-h-[500px] overflow-y-auto scrollbar-thin pr-1">
+                                    <AnalysisMarkdown content={result.content} />
+                                </div>
+                                <div className="mt-3 pt-2 border-t border-white/5 flex items-center justify-between text-[10px] text-gray-600">
+                                    <span>Model: {result.model}</span>
+                                    <span>{new Date(result.timestamp).toLocaleTimeString()}</span>
+                                </div>
+                            </>
+                        )}
+                    </CardContent>
+                </Card>
+            )}
+
+            {!loading && !result && (
+                <p className="text-xs text-gray-600 text-center py-4">
+                    Select an analysis type above to get AI-powered insights for {symbol}.
+                </p>
+            )}
+        </div>
+    );
+}
+
 /* ── Detail Panel ────────────────────────────────────────────────────── */
 
-function DetailPanel({ symbol, companyName, onClose }: { symbol: string; companyName?: string; onClose: () => void }) {
+function DetailPanel({ symbol, companyName, userId, onClose }: { symbol: string; companyName?: string; userId: string; onClose: () => void }) {
     const [range, setRange] = useState<ChartRange>('3M');
     const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
     const [socialData, setSocialData] = useState<{ posts: SocialPost[]; summary: SocialSentimentSummary } | null>(null);
@@ -203,7 +373,7 @@ function DetailPanel({ symbol, companyName, onClose }: { symbol: string; company
     const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
     const [chartLoading, setChartLoading] = useState(true);
     const [socialLoading, setSocialLoading] = useState(true);
-    const [detailTab, setDetailTab] = useState<'social' | 'predictions'>('social');
+    const [detailTab, setDetailTab] = useState<'social' | 'predictions' | 'ai'>('social');
 
     useEffect(() => {
         let cancelled = false;
@@ -372,7 +542,7 @@ function DetailPanel({ symbol, companyName, onClose }: { symbol: string; company
                     <div className="bg-white/5 rounded-lg p-3 text-center">
                         <p className="text-xs text-gray-400">SMA 20</p>
                         <p className="text-sm font-medium text-orange-400">
-                            {latestPoint.sma20 ? formatPrice(latestPoint.sma20) : '—'}
+                            {latestPoint.sma20 ? formatPrice(latestPoint.sma20) : '\u2014'}
                         </p>
                         {latestPoint.sma20 && (
                             <p className={`text-[10px] ${latestPoint.price >= latestPoint.sma20 ? 'text-green-400' : 'text-red-400'}`}>
@@ -383,7 +553,7 @@ function DetailPanel({ symbol, companyName, onClose }: { symbol: string; company
                     <div className="bg-white/5 rounded-lg p-3 text-center">
                         <p className="text-xs text-gray-400">SMA 50</p>
                         <p className="text-sm font-medium text-purple-400">
-                            {latestPoint.sma50 ? formatPrice(latestPoint.sma50) : '—'}
+                            {latestPoint.sma50 ? formatPrice(latestPoint.sma50) : '\u2014'}
                         </p>
                         {latestPoint.sma50 && (
                             <p className={`text-[10px] ${latestPoint.price >= latestPoint.sma50 ? 'text-green-400' : 'text-red-400'}`}>
@@ -394,7 +564,7 @@ function DetailPanel({ symbol, companyName, onClose }: { symbol: string; company
                 </div>
             )}
 
-            {/* Detail Tabs: Social & News / Prediction Markets */}
+            {/* Detail Tabs: Social & News / Prediction Markets / AI Analysis */}
             <div>
                 <div className="flex items-center gap-4 mb-3 border-b border-white/10 pb-2">
                     <button
@@ -420,6 +590,17 @@ function DetailPanel({ symbol, companyName, onClose }: { symbol: string; company
                         <BarChart3 className="h-3.5 w-3.5" />
                         Predictions
                         {!polyLoading && <span className="text-[10px] text-gray-500 ml-1">({polymarketEvents.length})</span>}
+                    </button>
+                    <button
+                        onClick={() => setDetailTab('ai')}
+                        className={`flex items-center gap-1.5 text-sm font-medium pb-1 border-b-2 transition-colors ${
+                            detailTab === 'ai'
+                                ? 'border-amber-400 text-white'
+                                : 'border-transparent text-gray-500 hover:text-gray-300'
+                        }`}
+                    >
+                        <Sparkles className="h-3.5 w-3.5" />
+                        AI Analysis
                     </button>
                 </div>
 
@@ -504,6 +685,10 @@ function DetailPanel({ symbol, companyName, onClose }: { symbol: string; company
                             </div>
                         )}
                     </>
+                )}
+
+                {detailTab === 'ai' && (
+                    <AIAnalysisPanel symbol={symbol} userId={userId} />
                 )}
             </div>
         </div>
@@ -597,12 +782,10 @@ export default function PortfolioTrendDashboard({ userId }: { userId: string }) 
 
     return (
         <div className="space-y-4">
-            <div className="flex items-center justify-between">
-                <p className="text-xs text-gray-500">
-                    Monitoring {positions.length} holding{positions.length !== 1 ? 's' : ''}
-                    {trendsLoading && ' — loading trends...'}
-                </p>
-            </div>
+            <p className="text-xs text-gray-500">
+                Monitoring {positions.length} holding{positions.length !== 1 ? 's' : ''}
+                {trendsLoading && ' \u2014 loading trends...'}
+            </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {sortedPositions.map(pos => {
@@ -644,7 +827,7 @@ export default function PortfolioTrendDashboard({ userId }: { userId: string }) 
                             </button>
 
                             {isExpanded && (
-                                <DetailPanel symbol={pos.symbol} companyName={pos.company} onClose={() => setExpanded(null)} />
+                                <DetailPanel symbol={pos.symbol} companyName={pos.company} userId={userId} onClose={() => setExpanded(null)} />
                             )}
                         </div>
                     );

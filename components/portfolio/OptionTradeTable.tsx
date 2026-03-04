@@ -11,6 +11,7 @@ interface OptionTradeTableProps {
     loading: boolean;
     statusFilter: '' | 'Open' | 'Closed';
     currentPrices?: Record<string, OptionPriceData>;
+    stockPrices?: Record<string, number>;
     onEdit: (trade: TradeData) => void;
     onDelete: (tradeId: string) => void;
 }
@@ -46,7 +47,7 @@ interface ContractGroup {
     latestTradeDate: number;
 }
 
-export default function OptionTradeTable({ trades, loading, statusFilter, currentPrices, onEdit, onDelete }: OptionTradeTableProps) {
+export default function OptionTradeTable({ trades, loading, statusFilter, currentPrices, stockPrices, onEdit, onDelete }: OptionTradeTableProps) {
     const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
     const toggleExpand = (key: string) => {
@@ -216,6 +217,7 @@ export default function OptionTradeTable({ trades, loading, statusFilter, curren
                                     showPL={showPL}
                                     pl={pl}
                                     plPositive={plPositive}
+                                    stockPrice={stockPrices?.[group.symbol]}
                                     onEdit={onEdit}
                                     onDelete={onDelete}
                                     colCount={COL_COUNT}
@@ -241,17 +243,37 @@ interface GroupRowsProps {
     showPL: boolean;
     pl: number;
     plPositive: boolean;
+    stockPrice?: number;
     onEdit: (trade: TradeData) => void;
     onDelete: (tradeId: string) => void;
     colCount: number;
 }
 
-function GroupRows({ group, isExpanded, onToggle, cfColor, cfSign, cf, currentMid, unrealizedPL, showPL, pl, plPositive, onEdit, onDelete, colCount }: GroupRowsProps) {
+function getMoneyness(contractType: string, strike: number, stockPrice: number): { label: string; color: string; intrinsic: number; extrinsic: number } | null {
+    if (!stockPrice || stockPrice <= 0) return null;
+    const itm = contractType === 'CALL' ? stockPrice - strike : strike - stockPrice;
+    const intrinsic = Math.max(0, itm);
+    let label: string;
+    let color: string;
+    if (itm > stockPrice * 0.10) { label = 'DEEP ITM'; color = 'text-emerald-400 bg-emerald-500/15 border-emerald-500/20'; }
+    else if (itm > 0) { label = 'ITM'; color = 'text-green-400 bg-green-500/15 border-green-500/20'; }
+    else if (itm > -stockPrice * 0.05) { label = 'ATM'; color = 'text-yellow-400 bg-yellow-500/15 border-yellow-500/20'; }
+    else { label = 'OTM'; color = 'text-red-400 bg-red-500/15 border-red-500/20'; }
+    return { label, color, intrinsic, extrinsic: 0 }; // extrinsic computed with option price later
+}
+
+function GroupRows({ group, isExpanded, onToggle, cfColor, cfSign, cf, currentMid, unrealizedPL, showPL, pl, plPositive, stockPrice, onEdit, onDelete, colCount }: GroupRowsProps) {
     // Sort detail trades by date desc
     const sortedTrades = useMemo(() =>
         [...group.trades].sort((a, b) => new Date(b.executedAt).getTime() - new Date(a.executedAt).getTime()),
         [group.trades]
     );
+
+    const moneyness = group.status === 'Open' && stockPrice ? getMoneyness(group.contractType, group.strike, stockPrice) : null;
+    const intrinsic = moneyness ? moneyness.intrinsic : 0;
+    const extrinsic = currentMid !== null ? Math.max(0, currentMid - intrinsic) : 0;
+    const equivShares = group.netContracts * 100;
+    const isDeepITM = moneyness?.label.includes('ITM') && group.direction === 'long';
 
     return (
         <>
@@ -269,9 +291,16 @@ function GroupRows({ group, isExpanded, onToggle, cfColor, cfSign, cf, currentMi
                     </span>
                 </td>
                 <td className="px-4 py-3">
-                    <Badge variant={group.contractType === 'CALL' ? 'success' : 'destructive'}>
-                        {group.contractType}
-                    </Badge>
+                    <div className="flex items-center gap-1.5">
+                        <Badge variant={group.contractType === 'CALL' ? 'success' : 'destructive'}>
+                            {group.contractType}
+                        </Badge>
+                        {moneyness && (
+                            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${moneyness.color}`}>
+                                {moneyness.label}
+                            </span>
+                        )}
+                    </div>
                 </td>
                 <td className="px-4 py-3 text-gray-300">
                     {formatCurrency(group.strike)}
@@ -322,6 +351,33 @@ function GroupRows({ group, isExpanded, onToggle, cfColor, cfSign, cf, currentMi
                     {showPL ? `${plPositive ? '+' : '-'}${formatCurrency(Math.abs(pl))}` : '—'}
                 </td>
             </tr>
+
+            {/* Moneyness info row for open ITM positions */}
+            {group.status === 'Open' && moneyness && currentMid !== null && (
+                <tr className="bg-white/[0.02]">
+                    <td></td>
+                    <td colSpan={colCount - 1} className="px-4 py-1.5">
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]">
+                            {stockPrice && (
+                                <span className="text-gray-500">
+                                    Underlying: <span className="text-gray-300">{formatCurrency(stockPrice)}</span>
+                                </span>
+                            )}
+                            <span className="text-gray-500">
+                                Intrinsic: <span className="text-gray-300">{formatCurrency(intrinsic)}</span>
+                            </span>
+                            <span className="text-gray-500">
+                                Extrinsic: <span className="text-gray-300">{formatCurrency(extrinsic)}</span>
+                            </span>
+                            {isDeepITM && (
+                                <span className="text-emerald-400/80">
+                                    ~{equivShares} share equivalent (high delta)
+                                </span>
+                            )}
+                        </div>
+                    </td>
+                </tr>
+            )}
 
             {/* Detail rows */}
             {isExpanded && sortedTrades.map(trade => {

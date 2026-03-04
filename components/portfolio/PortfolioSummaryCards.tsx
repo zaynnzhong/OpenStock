@@ -83,10 +83,11 @@ export default function PortfolioSummaryCards({ summary }: PortfolioSummaryCards
                 positive={summary.totalUnrealizedPL >= 0}
             />
             <StatCard
-                label="Options Premium"
-                value={`${summary.totalOptionsPremium >= 0 ? '+' : ''}${formatCurrency(summary.totalOptionsPremium)}`}
+                label="Options (Closed)"
+                value={`${summary.totalOptionsClosedPL >= 0 ? '+' : ''}${formatCurrency(summary.totalOptionsClosedPL)}`}
+                subValue={summary.totalOpenOptionsValue > 0 ? `Open: ${formatCurrency(summary.totalOpenOptionsValue)}` : undefined}
                 icon={Coins}
-                positive={summary.totalOptionsPremium > 0 ? true : summary.totalOptionsPremium < 0 ? false : null}
+                positive={summary.totalOptionsClosedPL > 0 ? true : summary.totalOptionsClosedPL < 0 ? false : null}
             />
         </div>
     );
