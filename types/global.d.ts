@@ -310,6 +310,109 @@ declare global {
         totalPL: number;
     };
 
+    // Position Plan types
+    type PositionTier = 'core' | 'satellite' | 'speculative';
+
+    type StagedTarget = {
+        price: number;
+        label: string;
+        sellPct: number;
+        trailingStopPct?: number;
+        reached: boolean;
+        reachedAt?: string;
+    };
+
+    type CashTransactionType = 'DEPOSIT' | 'WITHDRAWAL' | 'TRADE_BUY' | 'TRADE_SELL' | 'OPTION_PREMIUM' | 'DIVIDEND';
+
+    type CashTransaction = {
+        type: CashTransactionType;
+        amount: number;
+        description: string;
+        relatedSymbol?: string;
+        relatedTradeId?: string;
+        date: string;
+    };
+
+    type PositionPlanSlot = {
+        symbol: string;
+        tier: PositionTier;
+        topics: string[];
+        targetPct: number | null;
+        targetAmount: number | null;
+        notes: string;
+        addedAt: string;
+        sector?: string;
+        industry?: string;
+        stagedTargets: StagedTarget[];
+        stopLossPrice?: number;
+        trailingStopPct?: number;
+        trailingStopActivatedAt?: string;
+        maxDrawdownPct: number;
+        costBasis?: number;
+        avgEntryPrice?: number;
+    };
+
+    type TierTargets = {
+        core: number;
+        satellite: number;
+        speculative: number;
+    };
+
+    type TierMaxSlots = {
+        core: number;
+        satellite: number;
+        speculative: number;
+    };
+
+    type PositionPlanData = {
+        userId: string;
+        slots: PositionPlanSlot[];
+        tierTargets: TierTargets;
+        tierMaxSlots: TierMaxSlots;
+        cashBalance: number;
+        cashTransactions: CashTransaction[];
+        maxDrawdownPctDefault: number;
+    };
+
+    type EnrichedPlanSlot = PositionPlanSlot & {
+        actualPct: number;
+        actualAmount: number;
+        deltaPct: number;
+        hasPosition: boolean;
+        currentPrice?: number;
+        maxLossAmount?: number;
+        stopLossDistance?: number;
+        drawdownFromHigh?: number;
+    };
+
+    type RuleViolationSeverity = 'error' | 'warning' | 'info';
+
+    type RuleViolation = {
+        ruleId: string;
+        ruleName: string;
+        severity: RuleViolationSeverity;
+        message: string;
+        affectedSymbols: string[];
+        recommendation: string;
+    };
+
+    type RulesAuditResult = {
+        violations: RuleViolation[];
+        structureValid: boolean;
+        totalScore: number;
+        timestamp: string;
+    };
+
+    type SectorHeatData = {
+        sector: string;
+        etfSymbol: string;
+        performance1D: number;
+        performance1W: number;
+        performance1M: number;
+        momentum: number;
+        yourAllocationPct: number;
+    };
+
     // AI Portfolio Review — CRO Risk Mandate structured output
     type PortfolioReviewJSON = {
         structuralAudit: {

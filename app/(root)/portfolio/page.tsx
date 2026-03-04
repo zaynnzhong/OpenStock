@@ -5,6 +5,7 @@ import { getPortfolioSummary } from '@/lib/actions/portfolio.actions';
 import { getTradesWithPL } from '@/lib/actions/trade.actions';
 import { getPortfolioSettings } from '@/lib/actions/portfolio-settings.actions';
 import { getUserWatchlist } from '@/lib/actions/watchlist.actions';
+import { getPositionPlan } from '@/lib/actions/position-plan.actions';
 import PortfolioDashboard from '@/components/portfolio/PortfolioDashboard';
 
 export default async function PortfolioPage() {
@@ -19,11 +20,12 @@ export default async function PortfolioPage() {
     const userId = session.user.id;
 
     // Parallel data fetching
-    const [summary, tradesResult, settings, watchlistItems] = await Promise.all([
+    const [summary, tradesResult, settings, watchlistItems, positionPlan] = await Promise.all([
         getPortfolioSummary(userId),
         getTradesWithPL(userId, { limit: 50, offset: 0, sort: 'desc' }),
         getPortfolioSettings(userId),
         getUserWatchlist(userId),
+        getPositionPlan(userId),
     ]);
 
     const watchlistSymbols = watchlistItems.map((item: any) => item.symbol);
@@ -50,6 +52,7 @@ export default async function PortfolioPage() {
                     symbolOverrides: settings?.symbolOverrides || [],
                 }}
                 watchlistSymbols={watchlistSymbols}
+                positionPlan={positionPlan as PositionPlanData | null}
             />
         </div>
     );

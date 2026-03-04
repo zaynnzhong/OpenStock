@@ -8,6 +8,7 @@ import { computePosition, computePerTradePL, type TradeInput } from '@/lib/portf
 import { parseCSV, type ParseResult } from '@/lib/portfolio/csv-parser';
 import { getOptionsChain } from '@/lib/actions/finnhub.actions';
 import { revalidatePath } from 'next/cache';
+import { adjustCashForTrade } from '@/lib/actions/position-plan.actions';
 
 function serialize<T>(doc: T): T {
     return JSON.parse(JSON.stringify(doc));
@@ -37,6 +38,20 @@ export async function createTrade(data: {
     });
 
     await syncWatchlistFromTrades(data.userId, data.symbol.toUpperCase());
+
+    // Auto-sync cash balance (non-blocking — trade still succeeds if cash update fails)
+    try {
+        await adjustCashForTrade(data.userId, {
+            symbol: data.symbol.toUpperCase(),
+            type: data.type,
+            totalAmount: data.totalAmount,
+            tradeId: String(trade._id),
+            optionAction: data.optionDetails?.action,
+        });
+    } catch (e) {
+        console.error('Cash sync failed (trade still recorded):', e);
+    }
+
     revalidatePath('/portfolio');
     revalidatePath('/watchlist');
 

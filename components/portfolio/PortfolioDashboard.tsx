@@ -12,6 +12,7 @@ import AddTradeModal from "./AddTradeModal";
 import CSVImportModal from "./CSVImportModal";
 import PortfolioSettings from "./PortfolioSettings";
 import PortfolioAIPanel from "./PortfolioAIPanel";
+import PositionPlanPanel from "./PositionPlanPanel";
 
 interface PortfolioDashboardProps {
     userId: string;
@@ -23,6 +24,7 @@ interface PortfolioDashboardProps {
         symbolOverrides: { symbol: string; method: CostBasisMethod }[];
     };
     watchlistSymbols: string[];
+    positionPlan: PositionPlanData | null;
 }
 
 export default function PortfolioDashboard({
@@ -32,6 +34,7 @@ export default function PortfolioDashboard({
     tradeCount,
     settings,
     watchlistSymbols,
+    positionPlan,
 }: PortfolioDashboardProps) {
     const router = useRouter();
     const [activeTab, setActiveTab] = useState("overview");
@@ -73,6 +76,7 @@ export default function PortfolioDashboard({
                             <Sparkles className="h-3.5 w-3.5" />
                             AI Analysis
                         </TabsTrigger>
+                        <TabsTrigger value="plan">Position Plan</TabsTrigger>
                         <TabsTrigger value="settings">Settings</TabsTrigger>
                     </TabsList>
 
@@ -96,6 +100,17 @@ export default function PortfolioDashboard({
                 {/* AI Analysis Tab */}
                 <TabsContent value="ai">
                     <PortfolioAIPanel userId={userId} positions={summary.positions} />
+                </TabsContent>
+
+                {/* Position Plan Tab */}
+                <TabsContent value="plan">
+                    <PositionPlanPanel
+                        userId={userId}
+                        positionPlan={positionPlan}
+                        positions={summary.positions}
+                        summary={summary}
+                        trades={trades}
+                    />
                 </TabsContent>
 
                 {/* Settings Tab */}
