@@ -126,7 +126,18 @@ export async function getPortfolioSummary(userId: string): Promise<PortfolioSumm
                 ? group.totalOpeningPremium / group.openingContractCount
                 : 0;
             const totalCost = avgPremium * group.netContracts * 100;
-            const livePrice = openOptionPrices[key]?.mid || 0;
+            let livePrice = openOptionPrices[key]?.mid || 0;
+
+            // Fallback when live option pricing is unavailable:
+            // Use max(intrinsic value, premium paid) — intrinsic captures ITM value,
+            // premium paid captures time value for recently purchased options
+            if (livePrice === 0 && currentPrice > 0) {
+                const intrinsic = group.contractType === 'CALL'
+                    ? Math.max(0, currentPrice - group.strikePrice)
+                    : Math.max(0, group.strikePrice - currentPrice);
+                livePrice = Math.max(intrinsic, avgPremium);
+            }
+
             const currentValue = livePrice * group.netContracts * 100;
             const unrealizedPL = group.direction === 'long'
                 ? currentValue - totalCost

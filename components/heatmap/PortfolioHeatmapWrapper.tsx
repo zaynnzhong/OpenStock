@@ -20,8 +20,8 @@ export default async function PortfolioHeatmapWrapper() {
         return <PortfolioHeatmap initialData={[]} symbols={[]} />;
     }
 
-    // Only include positions with shares > 0
-    const activePositions = summary.positions.filter(p => p.shares > 0);
+    // Include positions with shares or open options (e.g., deep ITM calls as synthetic stock)
+    const activePositions = summary.positions.filter(p => p.shares > 0 || (p.openOptions?.length ?? 0) > 0);
     if (activePositions.length === 0) {
         return <PortfolioHeatmap initialData={[]} symbols={[]} />;
     }

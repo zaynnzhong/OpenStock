@@ -136,7 +136,7 @@ function PositionRow({
                 <td className="px-4 py-3 text-white font-medium">{pos.currentPrice > 0 ? formatCurrency(pos.currentPrice) : '—'}</td>
                 <td className="px-4 py-3 text-white">{pos.marketValue > 0 ? formatCurrency(pos.marketValue) : '—'}</td>
                 <td className={`px-4 py-3 font-medium ${unrealizedPositive ? 'text-green-400' : 'text-red-400'}`}>
-                    {pos.shares > 0 ? (
+                    {pos.shares > 0 || (pos.openOptions?.length ?? 0) > 0 ? (
                         <div className="flex flex-col">
                             <span>{unrealizedPositive ? '+' : ''}{formatCurrency(pos.unrealizedPL)}</span>
                             {pos.totalReturnPercent !== 0 && (
