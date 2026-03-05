@@ -11,7 +11,7 @@ function serialize<T>(doc: T): T {
     return JSON.parse(JSON.stringify(doc));
 }
 
-const MAX_TOTAL_SLOTS = 12;
+const MAX_TOTAL_SLOTS = 30;
 
 export async function getPositionPlan(userId: string) {
     await connectToDatabase();
