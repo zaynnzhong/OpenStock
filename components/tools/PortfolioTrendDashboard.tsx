@@ -715,13 +715,15 @@ export default function PortfolioTrendDashboard({ userId }: { userId: string }) 
                 setLoading(false);
                 return;
             }
-            const pos = summary.positions.map(p => ({
-                symbol: p.symbol,
-                company: p.company,
-                currentPrice: p.currentPrice,
-                marketValue: p.marketValue,
-                totalReturnPercent: p.totalReturnPercent,
-            }));
+            const pos = summary.positions
+                .filter(p => p.shares > 0 || (p.openOptions?.length ?? 0) > 0)
+                .map(p => ({
+                    symbol: p.symbol,
+                    company: p.company,
+                    currentPrice: p.currentPrice,
+                    marketValue: p.marketValue,
+                    totalReturnPercent: p.totalReturnPercent,
+                }));
             setPositions(pos);
             setLoading(false);
 
