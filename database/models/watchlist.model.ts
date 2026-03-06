@@ -7,6 +7,8 @@ export interface WatchlistItem extends Document {
     addedAt: Date;
     watchSince: Date | null;
     notes: string;
+    lists: string[];
+    priceAtAdd: number | null;
 }
 
 const WatchlistSchema = new Schema<WatchlistItem>(
@@ -17,6 +19,8 @@ const WatchlistSchema = new Schema<WatchlistItem>(
         addedAt: { type: Date, default: Date.now },
         watchSince: { type: Date, default: null },
         notes: { type: String, default: '' },
+        lists: { type: [String], default: [] },
+        priceAtAdd: { type: Number, default: null },
     },
     { timestamps: false }
 );

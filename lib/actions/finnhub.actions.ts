@@ -144,6 +144,40 @@ export async function getSMA(symbol: string, shortPeriod: number = 20, longPerio
     }
 }
 
+export async function getSMAIndicators(symbol: string): Promise<{
+    sma200d: number | null;
+    sma20w: number | null;
+    sma50w: number | null;
+    price: number | null;
+}> {
+    const result = { sma200d: null as number | null, sma20w: null as number | null, sma50w: null as number | null, price: null as number | null };
+
+    try {
+        const [daily, weekly20, weekly50] = await Promise.all([
+            getSMA(symbol, 200, 200, 'D').catch(() => null),
+            getSMA(symbol, 20, 20, 'W').catch(() => null),
+            getSMA(symbol, 50, 50, 'W').catch(() => null),
+        ]);
+
+        if (daily) {
+            result.sma200d = daily.smaShort;
+            result.price = daily.price;
+        }
+        if (weekly20) {
+            result.sma20w = weekly20.smaShort;
+            if (!result.price) result.price = weekly20.price;
+        }
+        if (weekly50) {
+            result.sma50w = weekly50.smaShort;
+            if (!result.price) result.price = weekly50.price;
+        }
+    } catch (e) {
+        console.error(`Error fetching SMA indicators for ${symbol}:`, e);
+    }
+
+    return result;
+}
+
 export async function getHistoricalPrices(symbol: string, fromDate: string) {
     try {
         const period1 = Math.floor(new Date(fromDate).getTime() / 1000);

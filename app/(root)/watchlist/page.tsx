@@ -2,7 +2,7 @@ import React, { Suspense } from 'react';
 import { auth } from '@/lib/better-auth/auth';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { getUserWatchlist } from '@/lib/actions/watchlist.actions';
+import { getUserWatchlist, getWatchlistGroups } from '@/lib/actions/watchlist.actions';
 import { getUserAlerts } from '@/lib/actions/alert.actions';
 import { getNews, getWatchlistData } from '@/lib/actions/finnhub.actions';
 import WatchlistManager from '@/components/watchlist/WatchlistManager';
@@ -23,10 +23,11 @@ export default async function WatchlistPage() {
     const userId = session.user.id;
 
     // Parallel data fetching
-    const [watchlistItems, alerts, news] = await Promise.all([
+    const [watchlistItems, alerts, news, watchlistGroups] = await Promise.all([
         getUserWatchlist(userId),
         getUserAlerts(userId),
-        getNews(), // Initial news fetch
+        getNews(),
+        getWatchlistGroups(userId),
     ]);
 
     const watchlistSymbols = watchlistItems.map((item: any) => item.symbol);
@@ -55,6 +56,8 @@ export default async function WatchlistPage() {
             watchSince: item.watchSince || null,
             addedAt: item.addedAt || null,
             notes: item.notes || '',
+            lists: item.lists || [],
+            priceAtAdd: item.priceAtAdd || null,
         };
     });
 
@@ -80,7 +83,12 @@ export default async function WatchlistPage() {
                 {/* Main Content */}
                 <div className="lg:col-span-3 space-y-8">
                     <div className="space-y-6">
-                        <WatchlistManager initialItems={watchlistItems} userId={userId} tableData={tableData} />
+                        <WatchlistManager
+                            initialItems={watchlistItems}
+                            userId={userId}
+                            tableData={tableData}
+                            initialGroups={watchlistGroups}
+                        />
                     </div>
 
                     {/* News Section */}

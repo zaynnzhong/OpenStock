@@ -4,19 +4,29 @@ import React, { useState, useMemo } from 'react';
 import WatchlistStockChip from './WatchlistStockChip';
 import TradingViewWatchlist from './TradingViewWatchlist';
 import WatchlistTable from './WatchlistTable';
+import WatchlistGroupTabs from './WatchlistGroupTabs';
 import { Button } from '@/components/ui/button';
 import { ArrowDownAZ, ArrowUpZA, ArrowUpDown } from 'lucide-react';
 import { WatchlistItem } from '@/database/models/watchlist.model';
+
+interface WatchlistGroup {
+    _id: string;
+    name: string;
+    color?: string;
+    sortOrder: number;
+}
 
 interface WatchlistManagerProps {
     initialItems: WatchlistItem[];
     userId: string;
     tableData?: any[];
+    initialGroups?: WatchlistGroup[];
 }
 
-export default function WatchlistManager({ initialItems, userId, tableData }: WatchlistManagerProps) {
-    // Sort state: 'asc' (A-Z), 'desc' (Z-A), or null (added order/default)
+export default function WatchlistManager({ initialItems, userId, tableData, initialGroups = [] }: WatchlistManagerProps) {
     const [sortOrder, setSortOrder] = useState<'asc' | 'desc' | null>(null);
+    const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+    const [groups, setGroups] = useState<WatchlistGroup[]>(initialGroups);
 
     const toggleSort = () => {
         if (sortOrder === null) setSortOrder('asc');
@@ -24,34 +34,58 @@ export default function WatchlistManager({ initialItems, userId, tableData }: Wa
         else setSortOrder(null);
     };
 
+    // Filter by selected group
+    const filteredItems = useMemo(() => {
+        if (!selectedGroupId) return initialItems;
+        return initialItems.filter((item: any) =>
+            item.lists && item.lists.includes(selectedGroupId)
+        );
+    }, [initialItems, selectedGroupId]);
+
     const sortedItems = useMemo(() => {
-        if (!sortOrder) return initialItems;
-
-        return [...initialItems].sort((a, b) => {
-            if (sortOrder === 'asc') {
-                return a.symbol.localeCompare(b.symbol);
-            } else {
-                return b.symbol.localeCompare(a.symbol);
-            }
+        if (!sortOrder) return filteredItems;
+        return [...filteredItems].sort((a, b) => {
+            if (sortOrder === 'asc') return a.symbol.localeCompare(b.symbol);
+            return b.symbol.localeCompare(a.symbol);
         });
-    }, [initialItems, sortOrder]);
+    }, [filteredItems, sortOrder]);
 
-    const sortedTableData = useMemo(() => {
-        if (!tableData || !sortOrder) return tableData;
-
-        return [...tableData].sort((a, b) => {
-            if (sortOrder === 'asc') {
-                return a.symbol.localeCompare(b.symbol);
-            } else {
+    const filteredTableData = useMemo(() => {
+        if (!tableData) return tableData;
+        if (!selectedGroupId) {
+            if (!sortOrder) return tableData;
+            return [...tableData].sort((a, b) => {
+                if (sortOrder === 'asc') return a.symbol.localeCompare(b.symbol);
                 return b.symbol.localeCompare(a.symbol);
-            }
-        });
-    }, [tableData, sortOrder]);
+            });
+        }
+
+        // Filter table data to match items in the selected group
+        const filteredSymbols = new Set(filteredItems.map(item => item.symbol));
+        let filtered = tableData.filter((d: any) => filteredSymbols.has(d.symbol));
+
+        if (sortOrder) {
+            filtered = [...filtered].sort((a, b) => {
+                if (sortOrder === 'asc') return a.symbol.localeCompare(b.symbol);
+                return b.symbol.localeCompare(a.symbol);
+            });
+        }
+        return filtered;
+    }, [tableData, selectedGroupId, filteredItems, sortOrder]);
 
     const watchlistSymbols = sortedItems.map((item) => item.symbol);
 
     return (
         <div className="space-y-6">
+            {/* Group Tabs */}
+            <WatchlistGroupTabs
+                groups={groups}
+                userId={userId}
+                selectedGroupId={selectedGroupId}
+                onSelectGroup={setSelectedGroupId}
+                onGroupsChange={setGroups}
+            />
+
             <div className="bg-gray-900/30 rounded-xl border border-gray-800 p-4 backdrop-blur-sm">
                 <div className="flex items-center justify-between mb-3">
                     <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider flex items-center">
@@ -97,12 +131,14 @@ export default function WatchlistManager({ initialItems, userId, tableData }: Wa
                         ))}
                     </div>
                 ) : (
-                    <p className="text-sm text-gray-500 italic">No stocks in watchlist.</p>
+                    <p className="text-sm text-gray-500 italic">
+                        {selectedGroupId ? "No stocks in this list." : "No stocks in watchlist."}
+                    </p>
                 )}
             </div>
 
-            {sortedTableData && sortedTableData.length > 0 && (
-                <WatchlistTable data={sortedTableData} userId={userId} />
+            {filteredTableData && filteredTableData.length > 0 && (
+                <WatchlistTable data={filteredTableData} userId={userId} groups={groups} />
             )}
 
             <div className="min-h-[550px]">

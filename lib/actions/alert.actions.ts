@@ -4,7 +4,7 @@ import { connectToDatabase } from '@/database/mongoose';
 import { Alert, type IAlert } from '@/database/models/alert.model';
 import { revalidatePath } from 'next/cache';
 
-// Create a new alert
+// Create a new price alert
 export async function createAlert(params: {
     userId: string;
     symbol: string;
@@ -15,14 +15,100 @@ export async function createAlert(params: {
         await connectToDatabase();
         const newAlert = await Alert.create({
             ...params,
+            alertType: 'price',
             active: true,
-            // expiresAt handled by default value in schema
         });
         revalidatePath('/watchlist');
         return JSON.parse(JSON.stringify(newAlert));
     } catch (error) {
         console.error('Error creating alert:', error);
         throw new Error('Failed to create alert');
+    }
+}
+
+// Create a percentage change alert
+export async function createPctChangeAlert(params: {
+    userId: string;
+    symbol: string;
+    threshold: number;
+    direction: 'above' | 'below';
+    basePrice: number;
+}) {
+    try {
+        await connectToDatabase();
+        const { userId, symbol, threshold, direction, basePrice } = params;
+
+        // Calculate target price from base + threshold
+        const multiplier = direction === 'above' ? 1 + threshold / 100 : 1 - threshold / 100;
+        const targetPrice = Math.round(basePrice * multiplier * 100) / 100;
+
+        const newAlert = await Alert.create({
+            userId,
+            symbol: symbol.toUpperCase(),
+            targetPrice,
+            condition: direction === 'above' ? 'ABOVE' : 'BELOW',
+            alertType: 'pct_change',
+            pctConfig: { threshold, direction, basePrice },
+            active: true,
+        });
+        revalidatePath('/watchlist');
+        return JSON.parse(JSON.stringify(newAlert));
+    } catch (error) {
+        console.error('Error creating pct change alert:', error);
+        throw new Error('Failed to create percentage change alert');
+    }
+}
+
+// Create an SMA cross alert
+export async function createSMAAlert(params: {
+    userId: string;
+    symbol: string;
+    indicator: 'sma200d' | 'sma20w' | 'sma50w';
+    crossDirection: 'above' | 'below';
+}) {
+    try {
+        await connectToDatabase();
+        const { userId, symbol, indicator, crossDirection } = params;
+
+        // Get current SMA value to set as initial target reference
+        let targetPrice = 0;
+        try {
+            const { getSMAIndicators } = await import('@/lib/actions/finnhub.actions');
+            const smaData = await getSMAIndicators(symbol);
+            if (indicator === 'sma200d' && smaData.sma200d) targetPrice = smaData.sma200d;
+            else if (indicator === 'sma20w' && smaData.sma20w) targetPrice = smaData.sma20w;
+            else if (indicator === 'sma50w' && smaData.sma50w) targetPrice = smaData.sma50w;
+        } catch {
+            // Non-critical
+        }
+
+        // Determine initial lastState
+        let lastState: 'above' | 'below' | null = null;
+        try {
+            const { getQuote } = await import('@/lib/actions/finnhub.actions');
+            const quote = await getQuote(symbol);
+            if (quote?.c && targetPrice > 0) {
+                lastState = quote.c >= targetPrice ? 'above' : 'below';
+            }
+        } catch {
+            // Non-critical
+        }
+
+        const newAlert = await Alert.create({
+            userId,
+            symbol: symbol.toUpperCase(),
+            targetPrice: targetPrice || 0,
+            condition: crossDirection === 'above' ? 'ABOVE' : 'BELOW',
+            alertType: 'sma_cross',
+            smaConfig: { indicator, crossDirection },
+            lastState,
+            active: true,
+        });
+        revalidatePath('/watchlist');
+        return JSON.parse(JSON.stringify(newAlert));
+    } catch (error) {
+        console.error('Error creating SMA alert:', error);
+        throw new Error('Failed to create SMA cross alert');
     }
 }
 
@@ -51,9 +137,7 @@ export async function deleteAlert(alertId: string) {
     }
 }
 
-// Auto-create holding alerts at ±25% of avg cost
-// Skips if the stock is already past the target (ITM)
-// Replaces old holding alerts when avgCost changes
+// Auto-create holding alerts at +/-25% of avg cost
 export async function syncHoldingAlerts(
     userId: string,
     symbol: string,
@@ -79,46 +163,46 @@ export async function syncHoldingAlerts(
 
         // +25% alert
         if (currentPrice < targetAbove) {
-            // Price hasn't hit +25% yet — alert when it goes ABOVE
             await Alert.create({
                 userId,
                 symbol: sym,
                 targetPrice: targetAbove,
                 condition: 'ABOVE',
                 source: 'holdings',
+                alertType: 'price',
                 active: true,
             });
         } else {
-            // Price already past +25% — alert if it drops back to that level
             await Alert.create({
                 userId,
                 symbol: sym,
                 targetPrice: targetAbove,
                 condition: 'BELOW',
                 source: 'holdings',
+                alertType: 'price',
                 active: true,
             });
         }
 
         // -25% alert
         if (currentPrice > targetBelow) {
-            // Price hasn't hit -25% yet — alert when it drops BELOW
             await Alert.create({
                 userId,
                 symbol: sym,
                 targetPrice: targetBelow,
                 condition: 'BELOW',
                 source: 'holdings',
+                alertType: 'price',
                 active: true,
             });
         } else {
-            // Price already past -25% — alert when it recovers back ABOVE
             await Alert.create({
                 userId,
                 symbol: sym,
                 targetPrice: targetBelow,
                 condition: 'ABOVE',
                 source: 'holdings',
+                alertType: 'price',
                 active: true,
             });
         }
@@ -130,24 +214,20 @@ export async function syncHoldingAlerts(
 }
 
 // Sync alerts for ALL existing holdings that have avgCost set
-// Called on watchlist page load to backfill alerts for pre-existing holdings
 export async function syncAllHoldingAlerts(userId: string, holdings: { symbol: string; avgCost: number; price: number }[]) {
     if (!userId || !holdings || holdings.length === 0) return;
 
     try {
         await connectToDatabase();
 
-        // Get all existing holding alerts for this user in one query
         const existingAlerts = await Alert.find({
             userId,
             source: 'holdings',
             triggered: false,
         }).lean();
 
-        // Build a set of symbols that already have holding alerts
         const alertedSymbols = new Set(existingAlerts.map((a: any) => a.symbol));
 
-        // Only sync stocks that have avgCost > 0 and don't already have holding alerts
         for (const h of holdings) {
             if (h.avgCost <= 0 || h.price <= 0) continue;
             if (alertedSymbols.has(h.symbol.toUpperCase())) continue;
@@ -159,7 +239,7 @@ export async function syncAllHoldingAlerts(userId: string, holdings: { symbol: s
     }
 }
 
-// Toggle alert active status (optional utility)
+// Toggle alert active status
 export async function toggleAlert(alertId: string, active: boolean) {
     try {
         await connectToDatabase();

@@ -2,7 +2,6 @@
 
 import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Sparkles } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import PortfolioSummaryCards from "./PortfolioSummaryCards";
 import PLChart from "./PLChart";
@@ -11,7 +10,6 @@ import TradeHistory from "./TradeHistory";
 import AddTradeModal from "./AddTradeModal";
 import CSVImportModal from "./CSVImportModal";
 import PortfolioSettings from "./PortfolioSettings";
-import PortfolioAIPanel from "./PortfolioAIPanel";
 import PositionPlanPanel from "./PositionPlanPanel";
 
 interface PortfolioDashboardProps {
@@ -72,10 +70,6 @@ export default function PortfolioDashboard({
                     <TabsList>
                         <TabsTrigger value="overview">Overview</TabsTrigger>
                         <TabsTrigger value="trades">Trades</TabsTrigger>
-                        <TabsTrigger value="ai" className="flex items-center gap-1.5">
-                            <Sparkles className="h-3.5 w-3.5" />
-                            AI Analysis
-                        </TabsTrigger>
                         <TabsTrigger value="plan">Position Plan</TabsTrigger>
                         <TabsTrigger value="settings">Settings</TabsTrigger>
                     </TabsList>
@@ -95,11 +89,6 @@ export default function PortfolioDashboard({
                 {/* Trades Tab */}
                 <TabsContent value="trades">
                     <TradeHistory userId={userId} initialTrades={trades} initialTotal={tradeCount} />
-                </TabsContent>
-
-                {/* AI Analysis Tab */}
-                <TabsContent value="ai">
-                    <PortfolioAIPanel userId={userId} positions={summary.positions} />
                 </TabsContent>
 
                 {/* Position Plan Tab */}

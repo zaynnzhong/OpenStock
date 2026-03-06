@@ -7,6 +7,7 @@ import { PortfolioSettings } from '@/database/models/portfolio-settings.model';
 import { computePosition, type TradeInput } from '@/lib/portfolio/cost-basis';
 import { getHistoricalPrices, getWatchlistData } from '@/lib/actions/finnhub.actions';
 import { getOpenOptionPrices } from '@/lib/actions/trade.actions';
+import { PositionPlan } from '@/database/models/position-plan.model';
 
 function serialize<T>(doc: T): T {
     return JSON.parse(JSON.stringify(doc));
@@ -231,8 +232,21 @@ export async function getPortfolioSummary(userId: string): Promise<PortfolioSumm
     }
     const todayReturnPercent = totalValue > 0 ? (todayReturn / (totalValue - todayReturn)) * 100 : 0;
 
+    // Fetch cash balance from position plan
+    let cashBalance = 0;
+    try {
+        const plan = await PositionPlan.findOne({ userId }, { cashBalance: 1 }).lean();
+        if (plan?.cashBalance) cashBalance = plan.cashBalance;
+    } catch {
+        // Non-critical
+    }
+
+    const portfolioValue = totalValue + cashBalance;
+
     return {
         totalValue,
+        cashBalance,
+        portfolioValue,
         totalCostBasis,
         totalRealizedPL,
         totalUnrealizedPL,

@@ -276,9 +276,8 @@ export const checkStockAlerts = inngest.createFunction(
     { id: 'check-stock-alerts' },
     { cron: '*/5 * * * *' }, // Run every 5 minutes
     async ({ step }) => {
-        // Step 1: Fetch active alerts
+        // Step 1: Fetch active alerts (include non-triggered price alerts AND active continuous alerts)
         const activeAlerts = await step.run('fetch-active-alerts', async () => {
-            // Dynamic import to avoid circular dep issues if any, or just standard import
             const { connectToDatabase } = await import("@/database/mongoose");
             const { Alert } = await import("@/database/models/alert.model");
 
@@ -287,8 +286,12 @@ export const checkStockAlerts = inngest.createFunction(
 
             return await Alert.find({
                 active: true,
-                triggered: false,
-                expiresAt: { $gt: now }
+                expiresAt: { $gt: now },
+                $or: [
+                    { triggered: false },
+                    // Continuous alerts (sma_cross, pct_change) stay active even after triggering
+                    { alertType: { $in: ['sma_cross', 'pct_change'] } },
+                ]
             }).lean();
         });
 
@@ -304,7 +307,6 @@ export const checkStockAlerts = inngest.createFunction(
             const { getQuote } = await import("@/lib/actions/finnhub.actions");
             const priceMap: Record<string, number> = {};
 
-            // Process in chunks to be safe
             for (const sym of symbols) {
                 try {
                     const quote = await getQuote(sym as string);
@@ -318,61 +320,179 @@ export const checkStockAlerts = inngest.createFunction(
             return priceMap;
         });
 
+        // Step 3b: Fetch SMA data for symbols that have SMA alerts
+        const smaAlertSymbols = [...new Set(
+            (activeAlerts as any[])
+                .filter((a: any) => a.alertType === 'sma_cross')
+                .map((a: any) => a.symbol)
+        )];
+
+        const smaData = await step.run('fetch-sma-data', async () => {
+            if (smaAlertSymbols.length === 0) return {};
+            const { getSMAIndicators } = await import("@/lib/actions/finnhub.actions");
+            const smaMap: Record<string, any> = {};
+
+            for (const sym of smaAlertSymbols) {
+                try {
+                    smaMap[sym as string] = await getSMAIndicators(sym as string);
+                } catch (e) {
+                    console.error(`Failed to fetch SMA for ${sym}`, e);
+                }
+            }
+            return smaMap;
+        });
+
         // Step 4: Check conditions
-        type TriggeredAlert = { alert: any; currentPrice: number };
+        type TriggeredAlert = { alert: any; currentPrice: number; description: string };
         const triggeredAlerts: TriggeredAlert[] = [];
+        const stateUpdates: { alertId: string; lastState: string; lastAlertedAt: Date }[] = [];
+
+        const now = new Date();
+        const COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24 hours
 
         for (const alert of activeAlerts as any[]) {
             const currentPrice = prices[alert.symbol];
             if (!currentPrice) continue;
 
-            let isTriggered = false;
-            // Simple check
-            if (alert.condition === 'ABOVE' && currentPrice >= alert.targetPrice) {
-                isTriggered = true;
-            } else if (alert.condition === 'BELOW' && currentPrice <= alert.targetPrice) {
-                isTriggered = true;
-            }
+            const alertType = alert.alertType || 'price';
 
-            if (isTriggered) {
-                triggeredAlerts.push({ alert, currentPrice });
+            if (alertType === 'price') {
+                // Standard price alert — one-shot
+                if (alert.triggered) continue;
+                let isTriggered = false;
+                if (alert.condition === 'ABOVE' && currentPrice >= alert.targetPrice) {
+                    isTriggered = true;
+                } else if (alert.condition === 'BELOW' && currentPrice <= alert.targetPrice) {
+                    isTriggered = true;
+                }
+                if (isTriggered) {
+                    const direction = alert.condition === 'ABOVE' ? 'above' : 'below';
+                    const source = alert.source === 'holdings' ? ' (+/-25% avg cost)' : '';
+                    triggeredAlerts.push({
+                        alert,
+                        currentPrice,
+                        description: `crossed ${direction} target of $${alert.targetPrice.toFixed(2)}${source}`,
+                    });
+                }
+            } else if (alertType === 'pct_change') {
+                // Percentage change alert — continuous monitoring
+                const cfg = alert.pctConfig;
+                if (!cfg) continue;
+
+                const pctChange = ((currentPrice - cfg.basePrice) / cfg.basePrice) * 100;
+                const currentState: 'above' | 'below' = cfg.direction === 'above'
+                    ? (pctChange >= cfg.threshold ? 'above' : 'below')
+                    : (pctChange <= -cfg.threshold ? 'below' : 'above');
+
+                const stateFlipped = alert.lastState && currentState !== alert.lastState;
+                const cooldownOk = !alert.lastAlertedAt || (now.getTime() - new Date(alert.lastAlertedAt).getTime() >= COOLDOWN_MS);
+
+                // Always update state
+                stateUpdates.push({ alertId: alert._id.toString(), lastState: currentState, lastAlertedAt: stateFlipped && cooldownOk ? now : alert.lastAlertedAt || now });
+
+                if (stateFlipped && cooldownOk) {
+                    const dir = cfg.direction === 'above' ? 'gained' : 'dropped';
+                    triggeredAlerts.push({
+                        alert,
+                        currentPrice,
+                        description: `${dir} ${cfg.threshold}% from base $${cfg.basePrice.toFixed(2)} (now ${pctChange >= 0 ? '+' : ''}${pctChange.toFixed(1)}%)`,
+                    });
+                } else if (!alert.lastState) {
+                    // First check — set initial state, check if already past threshold
+                    const alreadyTriggered = cfg.direction === 'above'
+                        ? pctChange >= cfg.threshold
+                        : pctChange <= -cfg.threshold;
+                    if (alreadyTriggered) {
+                        triggeredAlerts.push({
+                            alert,
+                            currentPrice,
+                            description: `${cfg.direction === 'above' ? 'gained' : 'dropped'} ${cfg.threshold}% from base $${cfg.basePrice.toFixed(2)} (now ${pctChange >= 0 ? '+' : ''}${pctChange.toFixed(1)}%)`,
+                        });
+                    }
+                }
+            } else if (alertType === 'sma_cross') {
+                // SMA cross alert — continuous monitoring
+                const cfg = alert.smaConfig;
+                if (!cfg) continue;
+
+                const symbolSMA = smaData[alert.symbol];
+                if (!symbolSMA) continue;
+
+                let smaValue: number | null = null;
+                if (cfg.indicator === 'sma200d') smaValue = symbolSMA.sma200d;
+                else if (cfg.indicator === 'sma20w') smaValue = symbolSMA.sma20w;
+                else if (cfg.indicator === 'sma50w') smaValue = symbolSMA.sma50w;
+
+                if (!smaValue) continue;
+
+                const currentState: 'above' | 'below' = currentPrice >= smaValue ? 'above' : 'below';
+                const stateFlipped = alert.lastState && currentState !== alert.lastState;
+                const cooldownOk = !alert.lastAlertedAt || (now.getTime() - new Date(alert.lastAlertedAt).getTime() >= COOLDOWN_MS);
+
+                stateUpdates.push({ alertId: alert._id.toString(), lastState: currentState, lastAlertedAt: stateFlipped && cooldownOk ? now : alert.lastAlertedAt || now });
+
+                if (stateFlipped && cooldownOk) {
+                    const indicatorLabel = cfg.indicator === 'sma200d' ? 'SMA 200D' : cfg.indicator === 'sma20w' ? 'SMA 20W' : 'SMA 50W';
+                    triggeredAlerts.push({
+                        alert,
+                        currentPrice,
+                        description: `crossed ${currentState} ${indicatorLabel} ($${smaValue.toFixed(2)})`,
+                    });
+                } else if (!alert.lastState) {
+                    // First check — set initial state only, don't alert
+                }
             }
         }
 
-        // Step 5: Process triggers + send Discord notifications
-        if (triggeredAlerts.length > 0) {
+        // Step 5: Process triggers + update states + send Discord notifications
+        if (triggeredAlerts.length > 0 || stateUpdates.length > 0) {
             await step.run('process-triggered-alerts', async () => {
                 const { connectToDatabase } = await import("@/database/mongoose");
                 const { Alert } = await import("@/database/models/alert.model");
                 await connectToDatabase();
 
+                // Update lastState for continuous alerts
+                for (const update of stateUpdates) {
+                    await Alert.findByIdAndUpdate(update.alertId, {
+                        lastState: update.lastState,
+                        lastAlertedAt: update.lastAlertedAt,
+                    });
+                }
+
                 const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
 
-                for (const { alert, currentPrice } of triggeredAlerts) {
-                    console.log(`🚀 ALERT FIRED: ${alert.symbol} is ${currentPrice} (${alert.condition} ${alert.targetPrice})`);
+                for (const { alert, currentPrice, description } of triggeredAlerts) {
+                    const alertType = alert.alertType || 'price';
+                    console.log(`ALERT FIRED: ${alert.symbol} is $${currentPrice} — ${description}`);
 
-                    // Mark triggered
-                    await Alert.findByIdAndUpdate(alert._id, { triggered: true, active: false });
+                    // One-shot price alerts get deactivated
+                    if (alertType === 'price') {
+                        await Alert.findByIdAndUpdate(alert._id, { triggered: true, active: false });
+                    }
+                    // Continuous alerts (pct_change, sma_cross) stay active — lastState updated above
 
                     // Send Discord notification
                     if (webhookUrl) {
                         try {
                             const isAbove = alert.condition === 'ABOVE';
-                            const emoji = isAbove ? '🟢' : '🔴';
-                            const direction = isAbove ? 'above' : 'below';
-                            const source = alert.source === 'holdings' ? ' (±25% avg cost)' : '';
+                            const emoji = alertType === 'sma_cross' ? (isAbove ? '📈' : '📉')
+                                : alertType === 'pct_change' ? (isAbove ? '🔺' : '🔻')
+                                : (isAbove ? '🟢' : '🔴');
+                            const typeLabel = alertType === 'sma_cross' ? 'SMA Cross'
+                                : alertType === 'pct_change' ? '% Change'
+                                : 'Price';
 
                             await fetch(webhookUrl, {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({
                                     embeds: [{
-                                        title: `${emoji} ${alert.symbol} Alert Triggered`,
-                                        description: `**${alert.symbol}** hit **$${currentPrice.toFixed(2)}** — crossed ${direction} your target of **$${alert.targetPrice.toFixed(2)}**${source}`,
+                                        title: `${emoji} ${alert.symbol} ${typeLabel} Alert`,
+                                        description: `**${alert.symbol}** at **$${currentPrice.toFixed(2)}** — ${description}`,
                                         color: isAbove ? 0x22c55e : 0xef4444,
                                         fields: [
                                             { name: 'Current Price', value: `$${currentPrice.toFixed(2)}`, inline: true },
-                                            { name: 'Target', value: `$${alert.targetPrice.toFixed(2)}`, inline: true },
+                                            { name: 'Type', value: typeLabel, inline: true },
                                             { name: 'Condition', value: `${alert.condition}`, inline: true },
                                         ],
                                         timestamp: new Date().toISOString(),
@@ -390,7 +510,8 @@ export const checkStockAlerts = inngest.createFunction(
 
         return {
             processed: activeAlerts.length,
-            triggered: triggeredAlerts.length
+            triggered: triggeredAlerts.length,
+            stateUpdates: stateUpdates.length,
         };
     }
 );

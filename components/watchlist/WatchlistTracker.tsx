@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { Eye } from "lucide-react";
+import { Eye, ChevronDown, ChevronUp, TrendingUp, TrendingDown } from "lucide-react";
 
 interface SparklineData {
     dates: string[];
@@ -15,9 +15,10 @@ interface WatchlistStock {
     price: number;
     change: number;
     changePercent: number;
-    watchSince: string; // ISO date string
-    startPrice: number; // first price in historical data
+    watchSince: string;
+    startPrice: number;
     sparkline: SparklineData;
+    priceAtAdd?: number | null;
 }
 
 interface WatchlistTrackerProps {
@@ -42,7 +43,6 @@ function Sparkline({ prices, width = 120, height = 40 }: { prices: number[]; wid
     });
 
     const linePath = points.join(" ");
-    // Area fill: line path + close at bottom-right and bottom-left
     const lastX = padding + chartW;
     const firstX = padding;
     const bottomY = padding + chartH;
@@ -64,8 +64,92 @@ function formatWatchDate(dateStr: string): string {
     return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
+function SMADot({ value, price }: { value: number | null; price: number }) {
+    if (!value) return <span className="w-2 h-2 rounded-full bg-gray-700" />;
+    const isAbove = price >= value;
+    return (
+        <span
+            className={`w-2 h-2 rounded-full ${isAbove ? "bg-green-500" : "bg-red-500"}`}
+            title={`$${value.toFixed(2)} (${isAbove ? "above" : "below"})`}
+        />
+    );
+}
+
+function ExpandedIndicators({ symbol, price, priceAtAdd }: { symbol: string; price: number; priceAtAdd?: number | null }) {
+    const [smaData, setSmaData] = useState<{ sma200d: number | null; sma20w: number | null; sma50w: number | null } | null>(null);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            try {
+                const { getSMAIndicators } = await import("@/lib/actions/finnhub.actions");
+                const data = await getSMAIndicators(symbol);
+                if (!cancelled) setSmaData(data);
+            } catch {
+                if (!cancelled) setSmaData({ sma200d: null, sma20w: null, sma50w: null });
+            } finally {
+                if (!cancelled) setLoading(false);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [symbol]);
+
+    const changeSinceAdd = priceAtAdd && priceAtAdd > 0
+        ? ((price - priceAtAdd) / priceAtAdd * 100)
+        : null;
+
+    if (loading) {
+        return <div className="text-xs text-gray-600 animate-pulse mt-2 pt-2 border-t border-white/5">Loading...</div>;
+    }
+
+    const indicators = [
+        { label: "SMA 200D", value: smaData?.sma200d },
+        { label: "SMA 20W", value: smaData?.sma20w },
+        { label: "SMA 50W", value: smaData?.sma50w },
+    ];
+
+    return (
+        <div className="mt-2 pt-2 border-t border-white/5 space-y-1" onClick={(e) => e.preventDefault()}>
+            {indicators.map(ind => {
+                const isAbove = ind.value ? price >= ind.value : null;
+                return (
+                    <div key={ind.label} className="flex items-center justify-between text-xs">
+                        <span className="text-gray-500">{ind.label}</span>
+                        {ind.value ? (
+                            <span className={`font-mono ${isAbove ? "text-green-400" : "text-red-400"}`}>
+                                ${ind.value.toFixed(2)}
+                                {isAbove ? (
+                                    <TrendingUp className="w-3 h-3 inline ml-1" />
+                                ) : (
+                                    <TrendingDown className="w-3 h-3 inline ml-1" />
+                                )}
+                                <span className="ml-1 text-[10px] font-medium">
+                                    {((price - ind.value) / ind.value * 100) >= 0 ? "+" : ""}
+                                    {((price - ind.value) / ind.value * 100).toFixed(1)}%
+                                </span>
+                            </span>
+                        ) : (
+                            <span className="text-gray-700">--</span>
+                        )}
+                    </div>
+                );
+            })}
+            {changeSinceAdd !== null && (
+                <div className="flex items-center justify-between text-xs pt-1">
+                    <span className="text-gray-500">Since Add</span>
+                    <span className={`font-mono font-semibold ${changeSinceAdd >= 0 ? "text-green-400" : "text-red-400"}`}>
+                        {changeSinceAdd >= 0 ? "+" : ""}{changeSinceAdd.toFixed(1)}%
+                    </span>
+                </div>
+            )}
+        </div>
+    );
+}
+
 export default function WatchlistTracker({ stocks: initialStocks, symbols }: WatchlistTrackerProps) {
     const [stocks, setStocks] = useState(initialStocks);
+    const [expandedSymbol, setExpandedSymbol] = useState<string | null>(null);
 
     useEffect(() => {
         setStocks(initialStocks);
@@ -138,36 +222,68 @@ export default function WatchlistTracker({ stocks: initialStocks, symbols }: Wat
                         ? ((stock.price - stock.startPrice) / stock.startPrice) * 100
                         : 0;
                     const isPositive = pctChange >= 0;
+                    const isExpanded = expandedSymbol === stock.symbol;
 
                     return (
-                        <Link
-                            key={stock.symbol}
-                            href={`/stocks/${stock.symbol}`}
-                            className="block rounded-xl border border-white/10 bg-black/40 backdrop-blur-md p-4 hover:bg-white/5 transition-colors shadow-lg"
-                        >
-                            <div className="flex items-start justify-between mb-2">
-                                <div>
-                                    <span className="font-bold text-white text-lg">{stock.symbol}</span>
-                                    <p className="text-gray-400 text-sm truncate max-w-[180px]">{stock.company}</p>
+                        <div key={stock.symbol} className="rounded-xl border border-white/10 bg-black/40 backdrop-blur-md shadow-lg overflow-hidden">
+                            <Link
+                                href={`/stocks/${stock.symbol}`}
+                                className="block p-4 hover:bg-white/5 transition-colors"
+                            >
+                                <div className="flex items-start justify-between mb-2">
+                                    <div>
+                                        <span className="font-bold text-white text-lg">{stock.symbol}</span>
+                                        <p className="text-gray-400 text-sm truncate max-w-[180px]">{stock.company}</p>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        {/* Compact SMA dots - always visible */}
+                                        <div className="flex items-center gap-0.5" title="SMA indicators (expand for details)">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-gray-700" />
+                                            <span className="w-1.5 h-1.5 rounded-full bg-gray-700" />
+                                            <span className="w-1.5 h-1.5 rounded-full bg-gray-700" />
+                                        </div>
+                                        <span className={`text-sm font-semibold px-2 py-0.5 rounded-md ${isPositive ? "bg-green-500/10 text-green-400" : "bg-red-500/10 text-red-400"}`}>
+                                            {isPositive ? "+" : ""}{pctChange.toFixed(1)}%
+                                        </span>
+                                    </div>
                                 </div>
-                                <span className={`text-sm font-semibold px-2 py-0.5 rounded-md ${isPositive ? "bg-green-500/10 text-green-400" : "bg-red-500/10 text-red-400"}`}>
-                                    {isPositive ? "+" : ""}{pctChange.toFixed(1)}%
-                                </span>
-                            </div>
 
-                            <div className="my-3">
-                                <Sparkline prices={stock.sparkline.prices} width={280} height={40} />
-                            </div>
+                                <div className="my-3">
+                                    <Sparkline prices={stock.sparkline.prices} width={280} height={40} />
+                                </div>
 
-                            <div className="flex items-center justify-between text-sm">
-                                <span className="text-gray-400">
-                                    ${stock.startPrice.toFixed(2)} → <span className="text-white font-medium">${stock.price.toFixed(2)}</span>
-                                </span>
-                                <span className="text-gray-500 text-xs">
-                                    Since {formatWatchDate(stock.watchSince)}
-                                </span>
-                            </div>
-                        </Link>
+                                <div className="flex items-center justify-between text-sm">
+                                    <span className="text-gray-400">
+                                        ${stock.startPrice.toFixed(2)} → <span className="text-white font-medium">${stock.price.toFixed(2)}</span>
+                                    </span>
+                                    <span className="text-gray-500 text-xs">
+                                        Since {formatWatchDate(stock.watchSince)}
+                                    </span>
+                                </div>
+                            </Link>
+
+                            {/* Expand toggle */}
+                            <button
+                                onClick={() => setExpandedSymbol(isExpanded ? null : stock.symbol)}
+                                className="w-full px-4 py-1.5 flex items-center justify-center gap-1 text-xs text-gray-500 hover:text-gray-300 hover:bg-white/5 transition-colors border-t border-white/5"
+                            >
+                                {isExpanded ? (
+                                    <>Collapse <ChevronUp className="w-3 h-3" /></>
+                                ) : (
+                                    <>Indicators <ChevronDown className="w-3 h-3" /></>
+                                )}
+                            </button>
+
+                            {isExpanded && (
+                                <div className="px-4 pb-3">
+                                    <ExpandedIndicators
+                                        symbol={stock.symbol}
+                                        price={stock.price}
+                                        priceAtAdd={stock.priceAtAdd}
+                                    />
+                                </div>
+                            )}
+                        </div>
                     );
                 })}
             </div>

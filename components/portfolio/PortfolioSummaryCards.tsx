@@ -1,6 +1,6 @@
 "use client";
 
-import { TrendingUp, TrendingDown, DollarSign, BarChart3, Percent, Coins } from "lucide-react";
+import { TrendingUp, TrendingDown, DollarSign, BarChart3, Percent, Coins, Wallet, Landmark } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/utils";
 
@@ -50,9 +50,15 @@ export default function PortfolioSummaryCards({ summary }: PortfolioSummaryCards
         : 0;
 
     return (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3">
             <StatCard
-                label="Total Value"
+                label="Portfolio Value"
+                value={formatCurrency(summary.portfolioValue)}
+                subValue={summary.cashBalance > 0 ? `Cash: ${formatCurrency(summary.cashBalance)}` : undefined}
+                icon={Wallet}
+            />
+            <StatCard
+                label="Holdings Value"
                 value={formatCurrency(summary.totalValue)}
                 icon={DollarSign}
             />

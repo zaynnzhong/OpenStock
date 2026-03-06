@@ -289,6 +289,8 @@ declare global {
 
     type PortfolioSummaryData = {
         totalValue: number;
+        cashBalance: number;
+        portfolioValue: number;
         totalCostBasis: number;
         totalRealizedPL: number;
         totalUnrealizedPL: number;

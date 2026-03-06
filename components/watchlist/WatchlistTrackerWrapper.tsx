@@ -58,6 +58,7 @@ export default async function WatchlistTrackerWrapper() {
                 dates: historical?.dates || [],
                 prices: historical?.prices || [],
             },
+            priceAtAdd: item.priceAtAdd || null,
         };
     });
 
