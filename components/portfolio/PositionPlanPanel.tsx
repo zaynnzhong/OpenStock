@@ -2,19 +2,6 @@
 
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { Trash2, Plus, Pencil, LayoutGrid, Tag, X, Target, ChevronDown, ChevronUp, Building2, Sparkles, Loader2, RefreshCw } from "lucide-react";
-import {
-    BarChart,
-    Bar,
-    PieChart,
-    Pie,
-    Cell,
-    XAxis,
-    YAxis,
-    CartesianGrid,
-    Tooltip,
-    ResponsiveContainer,
-    LabelList,
-} from "recharts";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -42,6 +29,7 @@ import {
     removePositionPlanSlot,
     updateTierTargets,
     updateTierMaxSlots,
+    updateSectorTargets,
     fetchSymbolSector,
     autoTagAllSlots,
     initializeAllSlotDefaults,
@@ -51,6 +39,9 @@ import CashPanel from "./plan/CashPanel";
 import ExitPlanEditor from "./plan/ExitPlanEditor";
 import RulesAuditPanel from "./plan/RulesAuditPanel";
 import SectorRotationPanel from "./plan/SectorRotationPanel";
+import RebalancePanel from "./plan/RebalancePanel";
+import SectorTargetEditor, { SectorTargetAutoFill } from "./plan/SectorTargetEditor";
+import PortfolioCharts from "./PortfolioCharts";
 
 const TIER_LABELS = {
     core: "Core",
@@ -112,6 +103,7 @@ export default function PositionPlanPanel({
     const tierMaxSlots: TierMaxSlots = plan?.tierMaxSlots ?? DEFAULT_TIER_MAX_SLOTS;
     const cashBalance = plan?.cashBalance ?? 0;
     const cashTransactions = plan?.cashTransactions ?? [];
+    const sectorTargets: SectorTarget[] = plan?.sectorTargets ?? [];
     const maxTotalSlots = tierMaxSlots.core + tierMaxSlots.satellite + tierMaxSlots.speculative;
 
     const totalPortfolioValue = useMemo(
@@ -287,6 +279,21 @@ export default function PositionPlanPanel({
         }
     };
 
+    const handleSectorTargetSave = async (sector: string, targetPct: number) => {
+        const updated = [...sectorTargets];
+        const idx = updated.findIndex((st) => st.sector === sector);
+        if (idx >= 0) {
+            updated[idx] = { sector, targetPct };
+        } else {
+            updated.push({ sector, targetPct });
+        }
+        updatePlan(await updateSectorTargets(userId, updated));
+    };
+
+    const handleSectorAutoFill = async (targets: SectorTarget[]) => {
+        updatePlan(await updateSectorTargets(userId, targets));
+    };
+
     function getStatusColor(diff: number) {
         const abs = Math.abs(diff);
         if (abs <= 5) return "text-green-400";
@@ -297,7 +304,7 @@ export default function PositionPlanPanel({
     return (
         <div className="space-y-6">
             {/* Portfolio Charts (Allocation + Returns) */}
-            <PortfolioCharts positions={positions} cashBalance={cashBalance} />
+            <PortfolioCharts positions={positions} cashBalance={cashBalance} showTargetRing={true} enrichedSlots={enrichedSlots} />
 
             {/* Overview Bar */}
             <PlanOverviewBar
@@ -438,12 +445,18 @@ export default function PositionPlanPanel({
                         })
                         .map(([sector, slots]) => {
                             const totalPct = slots.reduce((s, sl) => s + sl.actualPct, 0);
+                            const sectorTarget = sectorTargets.find((st) => st.sector === sector);
                             return (
                                 <Card key={sector} className="border border-gray-800 bg-gray-900/50">
                                     <CardHeader className="pb-2">
                                         <div className="flex items-center justify-between">
                                             <CardTitle className="text-sm font-semibold text-gray-200">{sector}</CardTitle>
-                                            <span className="text-xs text-gray-400">{totalPct.toFixed(1)}% of account</span>
+                                            <SectorTargetEditor
+                                                sector={sector}
+                                                actualPct={totalPct}
+                                                targetPct={sectorTarget?.targetPct}
+                                                onSave={handleSectorTargetSave}
+                                            />
                                         </div>
                                         <div className="flex gap-0.5 h-3 rounded overflow-hidden bg-gray-800 mt-1">
                                             {slots.map((sl) => {
@@ -481,18 +494,36 @@ export default function PositionPlanPanel({
                                 </Card>
                             );
                         })}
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={enrichedSlots.length >= 12}
-                        className="w-full text-gray-500 hover:text-gray-300 border border-dashed border-gray-700 hover:border-gray-600"
-                        onClick={() => { setAddTier("satellite"); setAddDialogOpen(true); }}
-                    >
-                        <Plus className="h-3.5 w-3.5 mr-1" />
-                        Add Symbol
-                    </Button>
+                    <div className="flex items-center justify-between">
+                        <SectorTargetAutoFill
+                            sectors={Object.entries(sectorGroups).map(([sector, slots]) => ({
+                                sector,
+                                actualPct: slots.reduce((s, sl) => s + sl.actualPct, 0),
+                            }))}
+                            onAutoFill={handleSectorAutoFill}
+                        />
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={enrichedSlots.length >= 12}
+                            className="text-gray-500 hover:text-gray-300 border border-dashed border-gray-700 hover:border-gray-600"
+                            onClick={() => { setAddTier("satellite"); setAddDialogOpen(true); }}
+                        >
+                            <Plus className="h-3.5 w-3.5 mr-1" />
+                            Add Symbol
+                        </Button>
+                    </div>
                 </div>
             )}
+
+            {/* Rebalance Calculator */}
+            <RebalancePanel
+                enrichedSlots={enrichedSlots}
+                tierTargets={tierTargets}
+                sectorTargets={sectorTargets}
+                totalAccountValue={totalAccountValue}
+                cashBalance={cashBalance}
+            />
 
             {/* Cash Management */}
             <CashPanel
@@ -1035,141 +1066,3 @@ function AddSlotDialog({
     );
 }
 
-// ---------- Portfolio Charts (Allocation + Return by Holding) ----------
-
-const PIE_COLORS = ['#2dd4bf', '#fb923c', '#c084fc', '#60a5fa', '#4ade80', '#f87171', '#facc15', '#f472b6', '#22d3ee', '#a3e635'];
-const CASH_COLOR = '#6b7280';
-
-const TOOLTIP_CONTENT_STYLE = {
-    backgroundColor: '#262626',
-    border: '1px solid rgba(255,255,255,0.2)',
-    borderRadius: '8px',
-    fontSize: '13px',
-};
-const TOOLTIP_LABEL_STYLE = { color: '#fafafa', fontWeight: 500 };
-const TOOLTIP_ITEM_STYLE = { color: '#e5e5e5' };
-
-function PortfolioCharts({ positions, cashBalance }: { positions: PositionWithPriceData[]; cashBalance: number }) {
-    const pieData = useMemo(() => {
-        const holdingsValue = positions.reduce((s, p) => s + p.marketValue, 0);
-        const total = holdingsValue + cashBalance;
-        const items = positions
-            .filter(p => p.marketValue > 0)
-            .sort((a, b) => b.marketValue - a.marketValue)
-            .map(p => ({
-                name: p.symbol,
-                value: p.marketValue,
-                pct: total > 0 ? (p.marketValue / total * 100) : 0,
-                isCash: false,
-            }));
-        if (cashBalance > 0) {
-            items.push({
-                name: 'Cash',
-                value: cashBalance,
-                pct: total > 0 ? (cashBalance / total * 100) : 0,
-                isCash: true,
-            });
-        }
-        return items;
-    }, [positions, cashBalance]);
-
-    const barData = useMemo(() => {
-        return positions
-            .filter(p => p.marketValue > 0)
-            .map(p => ({
-                symbol: p.symbol,
-                pl: +(p.totalReturnPercent.toFixed(1)),
-                fill: p.totalReturnPercent >= 0 ? '#22c55e' : '#ef4444',
-            }))
-            .sort((a, b) => Math.abs(b.pl) - Math.abs(a.pl));
-    }, [positions]);
-
-    if (positions.length === 0) return null;
-
-    return (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Pie Chart */}
-            <Card className="bg-white/[0.06]">
-                <CardHeader className="pb-2">
-                    <CardTitle className="text-base font-semibold text-white">Portfolio Allocation</CardTitle>
-                </CardHeader>
-                <CardContent>
-                    <ResponsiveContainer width="100%" height={260}>
-                        <PieChart>
-                            <Pie
-                                data={pieData}
-                                cx="50%"
-                                cy="45%"
-                                innerRadius={55}
-                                outerRadius={95}
-                                paddingAngle={2}
-                                dataKey="value"
-                                nameKey="name"
-                                stroke="rgba(0,0,0,0.3)"
-                                strokeWidth={1}
-                            >
-                                {pieData.map((entry, idx) => (
-                                    <Cell key={idx} fill={entry.isCash ? CASH_COLOR : PIE_COLORS[idx % PIE_COLORS.length]} />
-                                ))}
-                            </Pie>
-                            <Tooltip
-                                content={({ active, payload }) => {
-                                    if (!active || !payload?.[0]) return null;
-                                    const d = payload[0].payload as { name: string; value: number; pct: number };
-                                    return (
-                                        <div className="rounded-lg border border-white/20 bg-neutral-800 px-3 py-2 text-sm shadow-lg">
-                                            <p className="font-semibold text-white">{d.name}</p>
-                                            <p className="text-gray-200">${d.value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                                            <p className="text-gray-400">{d.pct.toFixed(1)}% of portfolio</p>
-                                        </div>
-                                    );
-                                }}
-                            />
-                        </PieChart>
-                    </ResponsiveContainer>
-                    {/* Legend */}
-                    <div className="flex flex-wrap gap-x-5 gap-y-2 mt-2 justify-center">
-                        {pieData.map((d, idx) => (
-                            <div key={d.name} className="flex items-center gap-1.5 text-sm">
-                                <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: d.isCash ? CASH_COLOR : PIE_COLORS[idx % PIE_COLORS.length] }} />
-                                <span className="text-white font-medium">{d.name}</span>
-                                <span className="text-gray-300">{d.pct.toFixed(1)}%</span>
-                            </div>
-                        ))}
-                    </div>
-                </CardContent>
-            </Card>
-
-            {/* Bar Chart */}
-            <Card className="bg-white/[0.06]">
-                <CardHeader className="pb-2">
-                    <CardTitle className="text-base font-semibold text-white">Return by Holding (%)</CardTitle>
-                </CardHeader>
-                <CardContent>
-                    <ResponsiveContainer width="100%" height={Math.max(280, barData.length * 28 + 40)}>
-                        <BarChart data={barData} layout="vertical" margin={{ left: 50, right: 50, top: 5, bottom: 5 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" horizontal={false} />
-                            <XAxis type="number" stroke="#a3a3a3" tick={{ fill: '#e5e5e5' }} fontSize={12} tickFormatter={v => `${v > 0 ? '+' : ''}${v}%`} />
-                            <YAxis type="category" dataKey="symbol" stroke="#a3a3a3" tick={{ fill: '#fafafa', fontWeight: 500 }} fontSize={13} width={50} interval={0} />
-                            <Tooltip
-                                contentStyle={TOOLTIP_CONTENT_STYLE} labelStyle={TOOLTIP_LABEL_STYLE} itemStyle={TOOLTIP_ITEM_STYLE}
-                                formatter={(value: any) => [`${Number(value) >= 0 ? '+' : ''}${Number(value).toFixed(1)}%`, 'Return']}
-                            />
-                            <Bar dataKey="pl" radius={[0, 4, 4, 0]} barSize={14}>
-                                {barData.map((entry, idx) => (
-                                    <Cell key={idx} fill={entry.fill} />
-                                ))}
-                                <LabelList
-                                    dataKey="pl"
-                                    position="right"
-                                    formatter={(v: any) => `${Number(v) >= 0 ? '+' : ''}${v}%`}
-                                    style={{ fontSize: 12, fill: '#fafafa', fontWeight: 500 }}
-                                />
-                            </Bar>
-                        </BarChart>
-                    </ResponsiveContainer>
-                </CardContent>
-            </Card>
-        </div>
-    );
-}

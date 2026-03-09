@@ -11,6 +11,7 @@ import AddTradeModal from "./AddTradeModal";
 import CSVImportModal from "./CSVImportModal";
 import PortfolioSettings from "./PortfolioSettings";
 import PositionPlanPanel from "./PositionPlanPanel";
+import PortfolioCharts from "./PortfolioCharts";
 
 interface PortfolioDashboardProps {
     userId: string;
@@ -82,6 +83,7 @@ export default function PortfolioDashboard({
 
                 {/* Overview Tab */}
                 <TabsContent value="overview" className="space-y-6">
+                    <PortfolioCharts positions={summary.positions} cashBalance={summary.cashBalance} />
                     <PLChart userId={userId} />
                     <PositionBreakdown positions={summary.positions} />
                 </TabsContent>

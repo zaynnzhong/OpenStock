@@ -51,11 +51,17 @@ export interface TierMaxSlots {
     speculative: number;
 }
 
+export interface SectorTarget {
+    sector: string;
+    targetPct: number;
+}
+
 export interface PositionPlanDocument extends Document {
     userId: string;
     slots: PositionPlanSlot[];
     tierTargets: TierTargets;
     tierMaxSlots: TierMaxSlots;
+    sectorTargets: SectorTarget[];
     cashBalance: number;
     cashTransactions: CashTransaction[];
     maxDrawdownPctDefault: number;
@@ -119,10 +125,19 @@ const PositionPlanSlotSchema = new Schema<PositionPlanSlot>(
     { _id: false }
 );
 
+const SectorTargetSchema = new Schema<SectorTarget>(
+    {
+        sector: { type: String, required: true },
+        targetPct: { type: Number, required: true },
+    },
+    { _id: false }
+);
+
 const PositionPlanSchema = new Schema<PositionPlanDocument>(
     {
         userId: { type: String, required: true, unique: true },
         slots: { type: [PositionPlanSlotSchema], default: [] },
+        sectorTargets: { type: [SectorTargetSchema], default: [] },
         tierTargets: {
             type: {
                 core: { type: Number, default: 70 },

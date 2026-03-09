@@ -40,7 +40,7 @@ export default function PositionBreakdown({ positions }: PositionBreakdownProps)
 
     return (
         <div className="overflow-x-auto rounded-xl border border-white/10 bg-black/40 backdrop-blur-md shadow-xl">
-            <table className="w-full text-left text-sm border-collapse min-w-[900px]">
+            <table className="w-full text-left text-sm border-collapse min-w-[1000px]">
                 <thead className="bg-white/5 text-gray-400 font-medium border-b border-white/10">
                     <tr>
                         <th className="px-4 py-3 font-semibold w-8"></th>
@@ -49,6 +49,7 @@ export default function PositionBreakdown({ positions }: PositionBreakdownProps)
                         <th className="px-4 py-3 font-semibold">Avg Cost</th>
                         <th className="px-4 py-3 font-semibold">Rolling Cost</th>
                         <th className="px-4 py-3 font-semibold">Price</th>
+                        <th className="px-4 py-3 font-semibold">Daily</th>
                         <th className="px-4 py-3 font-semibold">Market Value</th>
                         <th className="px-4 py-3 font-semibold">Unrealized P/L</th>
                         <th className="px-4 py-3 font-semibold">Realized P/L</th>
@@ -134,6 +135,18 @@ function PositionRow({
                     ) : '—'}
                 </td>
                 <td className="px-4 py-3 text-white font-medium">{pos.currentPrice > 0 ? formatCurrency(pos.currentPrice) : '—'}</td>
+                <td className="px-4 py-3">
+                    {pos.dailyChange !== 0 ? (
+                        <div className="flex flex-col">
+                            <span className={`font-medium ${pos.dailyChange >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                {pos.dailyChange >= 0 ? '+' : ''}{formatCurrency(pos.dailyChange)}
+                            </span>
+                            <span className={`text-xs opacity-75 ${pos.dailyChangePercent >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                {pos.dailyChangePercent >= 0 ? '+' : ''}{pos.dailyChangePercent.toFixed(2)}%
+                            </span>
+                        </div>
+                    ) : <span className="text-gray-600">—</span>}
+                </td>
                 <td className="px-4 py-3 text-white">{pos.marketValue > 0 ? formatCurrency(pos.marketValue) : '—'}</td>
                 <td className={`px-4 py-3 font-medium ${unrealizedPositive ? 'text-green-400' : 'text-red-400'}`}>
                     {pos.shares > 0 || (pos.openOptions?.length ?? 0) > 0 ? (
@@ -168,6 +181,7 @@ function PositionRow({
                                 <td className="px-4 py-2 text-xs text-gray-400">{formatCurrency(opt.avgPremium)}</td>
                                 <td className="px-4 py-2 text-xs text-gray-500">{formatCurrency(opt.totalCost)}</td>
                                 <td className="px-4 py-2 text-xs text-white">{opt.currentPrice > 0 ? formatCurrency(opt.currentPrice) : '—'}</td>
+                                <td className="px-4 py-2"></td>
                                 <td className="px-4 py-2 text-xs text-gray-300">{opt.currentValue > 0 ? formatCurrency(opt.currentValue) : '—'}</td>
                                 <td className={`px-4 py-2 text-xs font-medium ${plPositive ? 'text-green-400' : 'text-red-400'}`}>
                                     {opt.currentPrice > 0 ? `${plPositive ? '+' : ''}${formatCurrency(opt.unrealizedPL)}` : '—'}
@@ -181,7 +195,7 @@ function PositionRow({
                         <tr className="bg-white/[0.02]">
                             <td className="px-4 py-2"></td>
                             <td className="px-4 py-2 text-xs text-gray-500 pl-8">Stock P/L</td>
-                            <td className="px-4 py-2" colSpan={6}></td>
+                            <td className="px-4 py-2" colSpan={7}></td>
                             <td className={`px-4 py-2 text-xs font-medium ${stockPL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                                 {stockPL >= 0 ? '+' : ''}{formatCurrency(stockPL)}
                             </td>
@@ -192,7 +206,7 @@ function PositionRow({
                         <tr className="bg-white/[0.02]">
                             <td className="px-4 py-2"></td>
                             <td className="px-4 py-2 text-xs text-purple-400 pl-8">Closed Options P/L</td>
-                            <td className="px-4 py-2" colSpan={6}></td>
+                            <td className="px-4 py-2" colSpan={7}></td>
                             <td className={`px-4 py-2 text-xs font-medium ${(pos.optionsClosedPL ?? 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                                 {(pos.optionsClosedPL ?? 0) >= 0 ? '+' : ''}{formatCurrency(pos.optionsClosedPL ?? 0)}
                             </td>
@@ -203,7 +217,7 @@ function PositionRow({
                         <tr className="bg-white/[0.02]">
                             <td className="px-4 py-2"></td>
                             <td className="px-4 py-2 text-xs text-blue-400 pl-8">Dividends</td>
-                            <td className="px-4 py-2" colSpan={6}></td>
+                            <td className="px-4 py-2" colSpan={7}></td>
                             <td className="px-4 py-2 text-xs font-medium text-green-400">
                                 +{formatCurrency(pos.dividendsReceived)}
                             </td>

@@ -186,6 +186,9 @@ export async function getPortfolioSummary(userId: string): Promise<PortfolioSumm
             ? (pos.costBasis - optionsClosedPL - pos.dividendsReceived - pos.realizedPL) / pos.shares
             : 0;
 
+        const dailyChange = price?.change || 0;
+        const dailyChangePercent = price?.changePercent || 0;
+
         positions.push({
             symbol,
             company: price?.name || symbol,
@@ -210,6 +213,8 @@ export async function getPortfolioSummary(userId: string): Promise<PortfolioSumm
             })),
             openOptions,
             optionsClosedPL,
+            dailyChange,
+            dailyChangePercent,
         });
 
         totalValue += marketValue;

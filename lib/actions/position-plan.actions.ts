@@ -301,6 +301,28 @@ export async function initializeAllSlotDefaults(
     return serialize(plan.toObject());
 }
 
+// ---------- Sector Targets ----------
+
+export async function updateSectorTargets(userId: string, sectorTargets: SectorTarget[]) {
+    await connectToDatabase();
+
+    await PositionPlan.findOneAndUpdate(
+        { userId },
+        { $set: { sectorTargets } },
+        { upsert: true }
+    );
+
+    revalidatePath('/portfolio');
+    const plan = await PositionPlan.findOne({ userId }).lean();
+    return serialize(plan);
+}
+
+export async function getSectorTargets(userId: string): Promise<SectorTarget[]> {
+    await connectToDatabase();
+    const plan = await PositionPlan.findOne({ userId }, { sectorTargets: 1 }).lean();
+    return plan?.sectorTargets ? serialize(plan.sectorTargets) : [];
+}
+
 export async function removePositionPlanSlot(userId: string, symbol: string) {
     await connectToDatabase();
     const upperSymbol = symbol.toUpperCase();

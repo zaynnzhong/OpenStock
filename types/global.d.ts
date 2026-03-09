@@ -285,6 +285,8 @@ declare global {
         lots: { shares: number; costPerShare: number; date: string }[];
         openOptions: OpenOptionPosition[];
         optionsClosedPL: number;
+        dailyChange: number;
+        dailyChangePercent: number;
     };
 
     type PortfolioSummaryData = {
@@ -366,11 +368,17 @@ declare global {
         speculative: number;
     };
 
+    type SectorTarget = {
+        sector: string;
+        targetPct: number;
+    };
+
     type PositionPlanData = {
         userId: string;
         slots: PositionPlanSlot[];
         tierTargets: TierTargets;
         tierMaxSlots: TierMaxSlots;
+        sectorTargets: SectorTarget[];
         cashBalance: number;
         cashTransactions: CashTransaction[];
         maxDrawdownPctDefault: number;
