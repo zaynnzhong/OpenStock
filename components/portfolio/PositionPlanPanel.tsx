@@ -160,6 +160,9 @@ export default function PositionPlanPanel({
     const slotsByTier = useMemo(() => {
         const grouped: Record<PositionTier, EnrichedPlanSlot[]> = { core: [], satellite: [], speculative: [] };
         enrichedSlots.forEach((s) => grouped[s.tier].push(s));
+        for (const tier of TIERS) {
+            grouped[tier].sort((a, b) => b.actualAmount - a.actualAmount);
+        }
         return grouped;
     }, [enrichedSlots]);
 
