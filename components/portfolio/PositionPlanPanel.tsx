@@ -1,7 +1,18 @@
 "use client";
 
 import { useState, useMemo, useEffect, useCallback } from "react";
-import { Trash2, Plus, Pencil, LayoutGrid, Tag, X, Target, ChevronDown, ChevronUp, Building2, Sparkles, Loader2, RefreshCw } from "lucide-react";
+import { Trash2, Plus, Pencil, LayoutGrid, Tag, X, Target, ChevronDown, ChevronUp, Building2, Sparkles, Loader2, RefreshCw, GripVertical } from "lucide-react";
+import {
+    DndContext,
+    DragOverlay,
+    closestCenter,
+    PointerSensor,
+    useSensor,
+    useSensors,
+    type DragStartEvent,
+    type DragEndEvent,
+} from "@dnd-kit/core";
+import { useDraggable, useDroppable } from "@dnd-kit/core";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -255,6 +266,57 @@ export default function PositionPlanPanel({
         }
     };
 
+    // DnD state
+    const [activeSlot, setActiveSlot] = useState<EnrichedPlanSlot | null>(null);
+    const sensors = useSensors(
+        useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
+    );
+
+    const handleDragStart = (event: DragStartEvent) => {
+        const slot = enrichedSlots.find((s) => s.symbol === event.active.id);
+        setActiveSlot(slot ?? null);
+    };
+
+    const handleDragEnd = async (event: DragEndEvent) => {
+        setActiveSlot(null);
+        const { active, over } = event;
+        if (!over) return;
+
+        const overId = over.id as string;
+        // The droppable id is the tier name (core, satellite, speculative)
+        const targetTier = TIERS.includes(overId as PositionTier) ? (overId as PositionTier) : null;
+        if (!targetTier) return;
+
+        const slot = enrichedSlots.find((s) => s.symbol === active.id);
+        if (!slot || slot.tier === targetTier) return;
+
+        // Check if target tier is full
+        const targetSlots = slotsByTier[targetTier];
+        if (targetSlots.length >= tierMaxSlots[targetTier]) {
+            alert(`${TIER_LABELS[targetTier]} tier is full (${tierMaxSlots[targetTier]}/${tierMaxSlots[targetTier]} slots)`);
+            return;
+        }
+
+        try {
+            updatePlan(await upsertPositionPlanSlot(userId, {
+                symbol: slot.symbol,
+                tier: targetTier,
+                topics: slot.topics,
+                targetPct: slot.targetPct,
+                targetAmount: slot.targetAmount,
+                notes: slot.notes,
+                stagedTargets: slot.stagedTargets,
+                stopLossPrice: slot.stopLossPrice,
+                trailingStopPct: slot.trailingStopPct,
+                maxDrawdownPct: slot.maxDrawdownPct,
+                sector: slot.sector,
+                industry: slot.industry,
+            }));
+        } catch (e: any) {
+            alert(e.message || "Failed to move slot");
+        }
+    };
+
     const [autoTagging, setAutoTagging] = useState(false);
     const [initializing, setInitializing] = useState(false);
     const hasUntagged = enrichedSlots.some((s) => !s.sector);
@@ -380,53 +442,52 @@ export default function PositionPlanPanel({
             </div>
 
             {viewMode === "tier" ? (
-                /* Tier Columns */
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                    {TIERS.map((tier) => {
-                        const colors = TIER_COLORS[tier];
-                        const slots = slotsByTier[tier];
-                        const maxSlots = tierMaxSlots[tier];
-                        const isFull = slots.length >= maxSlots;
-
-                        return (
-                            <Card key={tier} className="border border-gray-800 bg-gray-900/50">
-                                <CardHeader className="pb-3">
-                                    <CardTitle className={`text-sm font-semibold ${colors.text}`}>
-                                        {TIER_LABELS[tier]}
-                                    </CardTitle>
-                                </CardHeader>
-                                <CardContent className="space-y-2">
-                                    {slots.length === 0 && (
-                                        <p className="text-xs text-gray-600 py-4 text-center">No slots yet</p>
-                                    )}
-                                    {slots.map((slot) => (
-                                        <SlotRow
-                                            key={slot.symbol}
-                                            userId={userId}
-                                            slot={slot}
-                                            totalAccountValue={totalAccountValue}
-                                            onRemove={handleRemove}
-                                            onUpdateTarget={handleUpdateTarget}
-                                            onUpdateTopics={handleUpdateTopics}
-                                            onPlanUpdate={updatePlan}
-                                            getStatusColor={getStatusColor}
-                                        />
-                                    ))}
-                                    <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        disabled={isFull || enrichedSlots.length >= maxTotalSlots}
-                                        className="w-full text-gray-500 hover:text-gray-300 border border-dashed border-gray-700 hover:border-gray-600"
-                                        onClick={() => { setAddTier(tier); setAddDialogOpen(true); }}
-                                    >
-                                        <Plus className="h-3.5 w-3.5 mr-1" />
-                                        Add {isFull ? `(${maxSlots}/${maxSlots})` : `(${slots.length}/${maxSlots})`}
-                                    </Button>
-                                </CardContent>
-                            </Card>
-                        );
-                    })}
-                </div>
+                /* Tier Columns with Drag & Drop */
+                <DndContext
+                    sensors={sensors}
+                    collisionDetection={closestCenter}
+                    onDragStart={handleDragStart}
+                    onDragEnd={handleDragEnd}
+                >
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                        {TIERS.map((tier) => (
+                            <DroppableTierColumn
+                                key={tier}
+                                tier={tier}
+                                slots={slotsByTier[tier]}
+                                maxSlots={tierMaxSlots[tier]}
+                                totalMaxSlots={maxTotalSlots}
+                                totalSlots={enrichedSlots.length}
+                                userId={userId}
+                                totalAccountValue={totalAccountValue}
+                                onRemove={handleRemove}
+                                onUpdateTarget={handleUpdateTarget}
+                                onUpdateTopics={handleUpdateTopics}
+                                onPlanUpdate={updatePlan}
+                                getStatusColor={getStatusColor}
+                                onAddClick={() => { setAddTier(tier); setAddDialogOpen(true); }}
+                                isOverlay={false}
+                            />
+                        ))}
+                    </div>
+                    <DragOverlay>
+                        {activeSlot && (
+                            <div className="opacity-80">
+                                <SlotRow
+                                    userId={userId}
+                                    slot={activeSlot}
+                                    totalAccountValue={totalAccountValue}
+                                    onRemove={() => {}}
+                                    onUpdateTarget={() => {}}
+                                    onUpdateTopics={() => {}}
+                                    onPlanUpdate={() => {}}
+                                    getStatusColor={getStatusColor}
+                                    isDragOverlay
+                                />
+                            </div>
+                        )}
+                    </DragOverlay>
+                </DndContext>
             ) : (
                 /* Sector View */
                 <div className="space-y-4">
@@ -552,6 +613,139 @@ export default function PositionPlanPanel({
     );
 }
 
+// ---------- Droppable Tier Column ----------
+function DroppableTierColumn({
+    tier,
+    slots,
+    maxSlots,
+    totalMaxSlots,
+    totalSlots,
+    userId,
+    totalAccountValue,
+    onRemove,
+    onUpdateTarget,
+    onUpdateTopics,
+    onPlanUpdate,
+    getStatusColor,
+    onAddClick,
+    isOverlay,
+}: {
+    tier: PositionTier;
+    slots: EnrichedPlanSlot[];
+    maxSlots: number;
+    totalMaxSlots: number;
+    totalSlots: number;
+    userId: string;
+    totalAccountValue: number;
+    onRemove: (symbol: string) => void;
+    onUpdateTarget: (slot: EnrichedPlanSlot, pct: number | null) => void;
+    onUpdateTopics: (slot: EnrichedPlanSlot, topics: string[]) => void;
+    onPlanUpdate: (plan: any) => void;
+    getStatusColor: (diff: number) => string;
+    onAddClick: () => void;
+    isOverlay: boolean;
+}) {
+    const { setNodeRef, isOver } = useDroppable({ id: tier });
+    const colors = TIER_COLORS[tier];
+    const isFull = slots.length >= maxSlots;
+
+    return (
+        <Card
+            ref={setNodeRef}
+            className={`border bg-gray-900/50 transition-colors ${
+                isOver ? `${colors.border} border-2 ${colors.bg}` : "border-gray-800"
+            }`}
+        >
+            <CardHeader className="pb-3">
+                <CardTitle className={`text-sm font-semibold ${colors.text}`}>
+                    {TIER_LABELS[tier]}
+                </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+                {slots.length === 0 && !isOver && (
+                    <p className="text-xs text-gray-600 py-4 text-center">No slots yet</p>
+                )}
+                {slots.length === 0 && isOver && (
+                    <p className={`text-xs ${colors.text} py-4 text-center`}>Drop here to move to {TIER_LABELS[tier]}</p>
+                )}
+                {slots.map((slot) => (
+                    <DraggableSlotRow
+                        key={slot.symbol}
+                        userId={userId}
+                        slot={slot}
+                        totalAccountValue={totalAccountValue}
+                        onRemove={onRemove}
+                        onUpdateTarget={onUpdateTarget}
+                        onUpdateTopics={onUpdateTopics}
+                        onPlanUpdate={onPlanUpdate}
+                        getStatusColor={getStatusColor}
+                    />
+                ))}
+                <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={isFull || totalSlots >= totalMaxSlots}
+                    className="w-full text-gray-500 hover:text-gray-300 border border-dashed border-gray-700 hover:border-gray-600"
+                    onClick={onAddClick}
+                >
+                    <Plus className="h-3.5 w-3.5 mr-1" />
+                    Add {isFull ? `(${maxSlots}/${maxSlots})` : `(${slots.length}/${maxSlots})`}
+                </Button>
+            </CardContent>
+        </Card>
+    );
+}
+
+// ---------- Draggable Slot Row Wrapper ----------
+function DraggableSlotRow({
+    userId,
+    slot,
+    totalAccountValue,
+    onRemove,
+    onUpdateTarget,
+    onUpdateTopics,
+    onPlanUpdate,
+    getStatusColor,
+}: {
+    userId: string;
+    slot: EnrichedPlanSlot;
+    totalAccountValue: number;
+    onRemove: (symbol: string) => void;
+    onUpdateTarget: (slot: EnrichedPlanSlot, pct: number | null) => void;
+    onUpdateTopics: (slot: EnrichedPlanSlot, topics: string[]) => void;
+    onPlanUpdate: (plan: any) => void;
+    getStatusColor: (diff: number) => string;
+}) {
+    const {
+        attributes,
+        listeners,
+        setNodeRef,
+        transform,
+        isDragging,
+    } = useDraggable({ id: slot.symbol });
+
+    const style = {
+        transform: transform ? `translate(${transform.x}px, ${transform.y}px)` : undefined,
+        opacity: isDragging ? 0.3 : 1,
+    };
+
+    return (
+        <div ref={setNodeRef} style={style}>
+            <SlotRow
+                userId={userId}
+                slot={slot}
+                totalAccountValue={totalAccountValue}
+                onRemove={onRemove}
+                onUpdateTarget={onUpdateTarget}
+                onUpdateTopics={onUpdateTopics}
+                onPlanUpdate={onPlanUpdate}
+                getStatusColor={getStatusColor}
+                dragHandleProps={{ ...attributes, ...listeners }}
+            />
+        </div>
+    );
+}
+
 // ---------- Tier Health Card ----------
 function TierHealthCard({
     tier,
@@ -658,6 +852,8 @@ function SlotRow({
     onUpdateTopics,
     onPlanUpdate,
     getStatusColor,
+    dragHandleProps,
+    isDragOverlay,
 }: {
     userId: string;
     slot: EnrichedPlanSlot;
@@ -667,6 +863,8 @@ function SlotRow({
     onUpdateTopics: (slot: EnrichedPlanSlot, topics: string[]) => void;
     onPlanUpdate: (plan: any) => void;
     getStatusColor: (diff: number) => string;
+    dragHandleProps?: Record<string, any>;
+    isDragOverlay?: boolean;
 }) {
     const colors = TIER_COLORS[slot.tier];
     const [editingTarget, setEditingTarget] = useState(false);
@@ -708,10 +906,19 @@ function SlotRow({
 
     return (
         <>
-            <div className="p-2.5 rounded-lg bg-gray-800/50 border border-gray-700/50 space-y-1.5">
+            <div className={`p-2.5 rounded-lg bg-gray-800/50 border space-y-1.5 ${isDragOverlay ? "border-blue-500/50 shadow-lg shadow-blue-500/10 ring-1 ring-blue-500/20" : "border-gray-700/50"}`}>
                 {/* Row 1: Symbol + Market Value + Actions */}
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
+                        {dragHandleProps && (
+                            <button
+                                {...dragHandleProps}
+                                className="text-gray-600 hover:text-gray-400 cursor-grab active:cursor-grabbing touch-none"
+                                title="Drag to move between tiers"
+                            >
+                                <GripVertical className="h-3.5 w-3.5" />
+                            </button>
+                        )}
                         <button onClick={() => setExpanded(!expanded)} className="text-gray-500 hover:text-gray-300">
                             {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
                         </button>
